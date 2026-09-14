@@ -1,0 +1,145 @@
+"""Unitree G1 (23-DoF) HoST standing-up environment configuration.
+
+The 23-DoF G1 is used because HoST's own URDF is ``g1_23dof.urdf``: 12 leg
+joints, ``waist_yaw_joint`` and 2 x (shoulder pitch/roll/yaw, elbow,
+wrist_roll). ``src.assets.robots.G1_23DOF_ACTION_SCALE``, ``get_g1_23dof_robot_cfg`` and the
+mjlab MJCF all agree with that joint set and with HoST's joint ordering.
+"""
+
+from src.assets.robots import get_g1_23dof_robot_cfg
+from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from src.tasks.host_recovery.host_recovery_env_cfg import make_host_recovery_env_cfg
+
+#: G1 links/sites used by HoST's reward terms.
+TORSO_BODY = "torso_link"  # stands in for HoST's ``keyframe_head``
+FOOT_SITES = ("left_foot", "right_foot")
+LEFT_ANKLE_BODY = "left_ankle_roll_link"
+RIGHT_ANKLE_BODY = "right_ankle_roll_link"
+LEFT_KNEE_BODY = "left_knee_link"
+RIGHT_KNEE_BODY = "right_knee_link"
+
+#: HoST ``init_state.target_joint_angles`` for the upper body, in mjlab's joint
+#: order (waist, left arm, right arm). HoST encourages the arms to sit flat at
+#: the sides once the robot is up.
+UPPER_BODY_JOINTS = (
+  "waist_yaw_joint",
+  "left_shoulder_pitch_joint",
+  "left_shoulder_roll_joint",
+  "left_shoulder_yaw_joint",
+  "left_elbow_joint",
+  "left_wrist_roll_joint",
+  "right_shoulder_pitch_joint",
+  "right_shoulder_roll_joint",
+  "right_shoulder_yaw_joint",
+  "right_elbow_joint",
+  "right_wrist_roll_joint",
+)
+HOST_TARGET_UPPER_DOF_POS = (0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0, -0.3, 0.0, 0.0, 0.0)
+
+#: HoST ``control.action_scale``; the ``action_scale`` curriculum decays it.
+HOST_ACTION_SCALE = 1.0
+#: HoST ``play.py`` pins the rescaler at 0.3 for evaluation.
+HOST_PLAY_ACTION_SCALE = 0.3
+
+
+def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Create the Unitree G1 HoST standing-up configuration."""
+  cfg = make_host_recovery_env_cfg()
+
+  cfg.scene.entities = {"robot": get_g1_23dof_robot_cfg()}
+  cfg.viewer.body_name = TORSO_BODY
+
+  foot_geoms = tuple(
+    f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
+  )
+
+  ##
+  # Rewards: fill in the per-robot body/joint names.
+  ##
+
+  cfg.rewards["standup"].params["body_cfg"] = SceneEntityCfg(
+    "robot", body_names=(TORSO_BODY,)
+  )
+  cfg.rewards["standup"].params["foot_cfg"] = SceneEntityCfg(
+    "robot", site_names=FOOT_SITES
+  )
+
+  cfg.rewards["style_left_foot_displacement"].params["foot_cfg"] = SceneEntityCfg(
+    "robot", body_names=(LEFT_ANKLE_BODY,)
+  )
+  cfg.rewards["style_right_foot_displacement"].params["foot_cfg"] = SceneEntityCfg(
+    "robot", body_names=(RIGHT_ANKLE_BODY,)
+  )
+  cfg.rewards["style_shank_orientation"].params["left_knee_cfg"] = SceneEntityCfg(
+    "robot", body_names=(LEFT_KNEE_BODY,)
+  )
+  cfg.rewards["style_shank_orientation"].params["left_foot_cfg"] = SceneEntityCfg(
+    "robot", body_names=(LEFT_ANKLE_BODY,)
+  )
+  cfg.rewards["style_shank_orientation"].params["right_knee_cfg"] = SceneEntityCfg(
+    "robot", body_names=(RIGHT_KNEE_BODY,)
+  )
+  cfg.rewards["style_shank_orientation"].params["right_foot_cfg"] = SceneEntityCfg(
+    "robot", body_names=(RIGHT_ANKLE_BODY,)
+  )
+  for name in (
+    "style_ground_parallel",
+    "style_feet_distance",
+    "target_feet_height_var",
+  ):
+    cfg.rewards[name].params["left_ankle_cfg" if name == "style_ground_parallel" else "left_foot_cfg"] = SceneEntityCfg(
+      "robot", body_names=(LEFT_ANKLE_BODY,)
+    )
+    cfg.rewards[name].params["right_ankle_cfg" if name == "style_ground_parallel" else "right_foot_cfg"] = SceneEntityCfg(
+      "robot", body_names=(RIGHT_ANKLE_BODY,)
+    )
+
+  cfg.rewards["target_target_upper_dof_pos"].params["asset_cfg"] = SceneEntityCfg(
+    "robot", joint_names=UPPER_BODY_JOINTS
+  )
+  cfg.rewards["target_target_upper_dof_pos"].params["target_upper_dof_pos"] = (
+    HOST_TARGET_UPPER_DOF_POS
+  )
+
+  ##
+  # Metrics follow the same torso/feet convention as the stand-up reward.
+  ##
+
+  cfg.metrics["host_head_height"].params["body_cfg"] = SceneEntityCfg(
+    "robot", body_names=(TORSO_BODY,)
+  )
+  cfg.metrics["host_head_height"].params["foot_cfg"] = SceneEntityCfg(
+    "robot", site_names=FOOT_SITES
+  )
+
+  ##
+  # Domain randomisation events.
+  ##
+
+  cfg.events["foot_friction"].params["asset_cfg"].geom_names = foot_geoms
+  cfg.events["base_com"].params["asset_cfg"].body_names = (TORSO_BODY,)
+
+  ##
+  # Actions: HoST drives a scalar rescaler, not a per-joint one.
+  #
+  # ``src.assets.robots.G1_23DOF_ACTION_SCALE`` (the torque-normalised per-joint scale used by the
+  # other tasks in this repository) is imported above and left unused on
+  # purpose; swap it in here if you prefer that convention.
+  ##
+
+  cfg.actions["joint_pos"].scale = HOST_ACTION_SCALE
+
+  ##
+  # Play mode overrides, mirroring HoST's ``play.py``.
+  ##
+
+  if play:
+    cfg.episode_length_s = int(1e9)
+    cfg.curriculum = {}
+    cfg.observations["actor"].terms["host"].params["add_noise"] = False
+    cfg.actions["joint_pos"].scale = HOST_PLAY_ACTION_SCALE
+    # Demo the paper's "diverse postures": sample the start pose randomly.
+    cfg.events["reset_base"].params["posture"] = None
+
+  return cfg
