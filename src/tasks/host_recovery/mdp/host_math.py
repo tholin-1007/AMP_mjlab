@@ -2,9 +2,9 @@
 
 HoST keeps these in two places:
 
-* ``legged_gym/envs/g1/g1_utils.py`` -- the :func:`tolerance` / :func:`sigmoid`
+- ``legged_gym/envs/g1/g1_utils.py`` -- the :func:`tolerance` / :func:`sigmoid`
   kernels that almost every reward term calls.
-* ``legged_gym/envs/base/host_ground.py`` -- ``HOST_CONSTRAINT_DT``,
+- ``legged_gym/envs/base/host_ground.py`` -- ``HOST_CONSTRAINT_DT``,
   ``reward_group_weights`` and the small tensor accessors.
 
 Concentrating them in one module means the rest of this package never has to
@@ -88,7 +88,3 @@ def _root_height(env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Ten
   """Base height above the world origin, HoST's ``root_states[:, 2]``."""
   asset: Entity = env.scene[asset_cfg.name]
   return asset.data.root_link_pos_w[:, 2]
-
-
-def _body_z(asset: Entity, body_ids: list[int] | torch.Tensor) -> torch.Tensor:
-  return asset.data.body_link_pos_w[:, body_ids, 2]

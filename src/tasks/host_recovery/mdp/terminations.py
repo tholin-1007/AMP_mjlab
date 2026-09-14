@@ -2,13 +2,13 @@
 
 HoST terminates an episode only on
 
-* the time limit (``time_out``, mjlab's built-in), and
-* the two velocity guards in ``check_termination``: ``dof_vel_limit`` (300) and
+- the time limit (``time_out``, mjlab's built-in), and
+- the two velocity guards in ``check_termination``: ``dof_vel_limit`` (300) and
   ``base_vel_limit`` (20), both very loose and both ignored during the
   unactuated window at the start of the episode.
 
 HoST's ground task sets ``terminate_after_contacts_on = []``, i.e. it does
-**not** terminate on contacts. That is essential: a robot standing up from the
+not terminate on contacts. That is essential: a robot standing up from the
 ground must be allowed to drag its torso, arms and shins on the floor. The port
 keeps that property -- there is no ``illegal_contact`` term here on purpose.
 """
@@ -55,7 +55,7 @@ def base_velocity_out_of_bounds(
 ) -> torch.Tensor:
   """Terminate on base linear velocity above ``limit`` (HoST ``base_vel_out``).
 
-  NOTE: HoST tests ``torch.norm(base_lin_vel[:, :3])``, i.e. the *world* frame
+  NOTE: HoST tests ``torch.norm(base_lin_vel[:, :3])``, i.e. the world frame
   linear velocity, so ``root_link_lin_vel_w`` is used here rather than the body
   frame one.
   """

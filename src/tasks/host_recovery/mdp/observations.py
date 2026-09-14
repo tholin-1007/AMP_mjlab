@@ -18,7 +18,7 @@ The port keeps HoST's "one tensor" design on purpose: HoST applies a
 per-channel uniform noise vector (see ``host_noise_vector``) and a global
 "motors are off" mask to the whole vector, neither of which maps onto mjlab's
 per-term noise/scale mechanism. The actor group in
-``host_recovery_env_cfg.py`` therefore declares a *single* term and sets
+``host_recovery_env_cfg.py`` therefore declares a single term and sets
 ``enable_corruption=False`` so mjlab does not add its own noise on top.
 
 NOTE: mjlab expects joint positions relative to the default pose
@@ -88,10 +88,10 @@ def host_observation(
 
   Reproduces ``LeggedRobot.compute_observations`` from HoST, including
 
-  * the per-channel uniform noise of ``_get_noise_scale_vec`` (noise is drawn
+  - the per-channel uniform noise of ``_get_noise_scale_vec`` (noise is drawn
     from ``[-1, 1]`` and multiplied by the scale vector, as in HoST), and
-  * the mask ``current_obs *= real_episode_length_buf > unactuated_time`` that
-    zeroes the *whole* observation while the motors are switched off.
+  - the mask ``current_obs *= real_episode_length_buf > unactuated_time`` that
+    zeroes the whole observation while the motors are switched off.
   """
   asset: Entity = env.scene[asset_cfg.name]
 

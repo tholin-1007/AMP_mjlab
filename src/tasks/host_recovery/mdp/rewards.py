@@ -26,7 +26,7 @@ The multiplicative ``task`` group cannot be decomposed that way, so
 :func:`standup` computes the whole product itself and already applies the 2.5
 group weight.
 
-NOTE: HoST multiplies every *constraint* scale (regu / style / target) by the
+NOTE: HoST multiplies every constraint scale (regu / style / target) by the
 control dt (0.02 s) in ``_prepare_reward_function`` while leaving the ``task``
 scales unscaled. :data:`HOST_CONSTRAINT_DT` reproduces that factor so the
 numbers in ``config/g1/env_cfgs.py`` can stay identical to HoST's own config.
@@ -42,8 +42,8 @@ from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from .host_math import (
-  HOST_CONSTRAINT_DT as HOST_CONSTRAINT_DT,
-  TASK_GROUP_WEIGHT as TASK_GROUP_WEIGHT,
+  HOST_CONSTRAINT_DT,
+  TASK_GROUP_WEIGHT,
   _DEFAULT_ASSET_CFG,
   _joint_pos,
   _root_height,
@@ -70,13 +70,13 @@ def standup(
 ) -> torch.Tensor:
   """HoST's multiplicative stand-up reward: ``task_orientation * head_height``.
 
-  Following "Learning to Get Up", the ``task`` group is a **product** rather
+  Following "Learning to Get Up", the ``task`` group is a product rather
   than a sum, so every condition has to hold at the same time; if any factor is
   zero the whole stand-up reward collapses to zero.
 
-  * ``task_orientation``: ``tolerance(-gz, (0.99, inf), 1.0, 0.05)`` -- the
+  - ``task_orientation``: ``tolerance(-gz, (0.99, inf), 1.0, 0.05)`` -- the
     base must be upright.
-  * ``task_head_height``: ``tolerance(h - feet_z, (1.0, inf), 1.0, 0.1)`` --
+  - ``task_head_height``: ``tolerance(h - feet_z, (1.0, inf), 1.0, 0.1)`` --
     head above the feet, i.e. actual stand-up progress.
 
   NOTE: HoST reads the head from a dedicated ``keyframe_head`` link that only
@@ -130,7 +130,7 @@ def regu_dof_vel(
 ##
 # style group -- motion style on the ground (HoST group weight 1.0).
 #
-# Every term is a *penalty indicator* (1.0 when the joint is outside the range
+# Every term is a penalty indicator (1.0 when the joint is outside the range
 # HoST considers natural), which is why their scales in HoST are negative.
 ##
 

@@ -7,11 +7,11 @@ ground instead of a hand-placed pose.
 
 ``G1Cfg.init_state`` in HoST:
 
-* ``pos = [0.0, 0.0, 0.5]`` -- 0.5 m above the ground (a prone G1's pelvis
+- ``pos = [0.0, 0.0, 0.5]`` -- 0.5 m above the ground (a prone G1's pelvis
   height), then gravity settles it,
-* ``rot = [0.0, -1, 0, 1.0]`` in ``(x, y, z, w)`` -- 180 deg about ``y``, i.e.
+- ``rot = [0.0, -1, 0, 1.0]`` in ``(x, y, z, w)`` -- 180 deg about ``y``, i.e.
   face down (prone),
-* ``default_joint_angles`` -- the loose "limbs slightly bent" pose the reset
+- ``default_joint_angles`` -- the loose "limbs slightly bent" pose the reset
   scatters around.
 
 The paper's "across diverse postures" contribution is resetting from prone,

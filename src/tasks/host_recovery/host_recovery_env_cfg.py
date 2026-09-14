@@ -10,7 +10,7 @@ and why the ``task`` group is computed inside :func:`rewards.standup`)::
     weight = <HoST scale> * <group weight> * HOST_CONSTRAINT_DT
 
 ``HOST_CONSTRAINT_DT`` is the 0.02 s control period that HoST multiplies every
-*constraint* scale by in ``_prepare_reward_function``.
+constraint scale by in ``_prepare_reward_function``.
 
 Rewards HoST defines but that this port cannot express without an unverified
 mjlab field are kept as commented-out entries carrying their exact HoST value,
@@ -52,7 +52,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
   # it internally and ``enable_corruption`` is off.
   #
   # The critic group is declared separately because mjlab needs it for the value
-  # function. NOTE: HoST feeds the *same* noisy vector to actor and critic; here
+  # function. NOTE: HoST feeds the same noisy vector to actor and critic; here
   # the critic gets the clean vector instead of an independent noise draw.
   ##
 
@@ -100,7 +100,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
   # Actions
   #
-  # NOTE: HoST's position target is *incremental*: ``target = dof_pos + action *
+  # NOTE: HoST's position target is incremental: ``target = dof_pos + action *
   # action_rescale``, re-based on the measured position every step, so the PD
   # error is always ``action * action_rescale``. mjlab's JointPositionAction
   # instead targets ``default_joint_pos + scale * action``. The two are not

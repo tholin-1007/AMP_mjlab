@@ -22,7 +22,7 @@ Both triggers are HoST's ``update_force_curriculum``:
         self.force[env_ids] -= 20
         self.action_rescale[env_ids] -= 0.02
 
-NOTE: HoST keeps ``force`` and ``action_rescale`` as *per-environment* tensors.
+NOTE: HoST keeps ``force`` and ``action_rescale`` as per-environment tensors.
 The port keeps the per-env state in :mod:`..mdp.pull_force` /
 ``_host_action_rescale`` but applies the decay from the mean over the resetting
 environments, because mjlab's curriculum terms are called with ``env_ids`` on
