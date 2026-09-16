@@ -99,8 +99,8 @@ def pull_force_decay(
 
   metrics = HoSTMetrics.get()
   reached = True
-  if metrics.initialized:
-    reached = bool(torch.mean(metrics.max_head_height[env_ids]) > threshold_height)
+  if metrics.initialized and metrics.last_episode_head_height is not None:
+    reached = bool(torch.mean(metrics.last_episode_head_height[env_ids]) > threshold_height)
   if reached:
     state.decay(env_ids, decay, minimum)
   return state.force.mean()

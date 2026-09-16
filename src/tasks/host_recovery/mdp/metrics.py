@@ -28,13 +28,20 @@ _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
 class HoSTMetrics:
-  """Per-environment running maximum of HoST's ``head_height``."""
+  """Per-environment stand-up progress, mirroring HoST's buffers.
+
+  ``max_head_height`` is the running maximum inside an episode and is cleared
+  on reset. ``current_head_height`` is HoST's ``old_headheight`` (the latest
+  step height), and ``last_episode_head_height`` keeps a copy of the final
+  height so curriculum terms can still see it after the reset event runs.
+  """
 
   _instance: "HoSTMetrics | None" = None
 
   def __init__(self) -> None:
     self.max_head_height: torch.Tensor | None = None
     self.current_head_height: torch.Tensor | None = None
+    self.last_episode_head_height: torch.Tensor | None = None
     self.initialized = False
 
   @classmethod
@@ -48,6 +55,7 @@ class HoSTMetrics:
       return
     self.max_head_height = torch.zeros(num_envs, device=device)
     self.current_head_height = torch.zeros(num_envs, device=device)
+    self.last_episode_head_height = torch.zeros(num_envs, device=device)
     self.initialized = True
 
   def update(self, head_height: torch.Tensor) -> None:
@@ -58,7 +66,12 @@ class HoSTMetrics:
   def reset(self, env_ids: torch.Tensor) -> None:
     if self.max_head_height is None:
       return
+    if self.current_head_height is not None:
+      assert self.last_episode_head_height is not None
+      self.last_episode_head_height[env_ids] = self.current_head_height[env_ids]
     self.max_head_height[env_ids] = 0.0
+    if self.current_head_height is not None:
+      self.current_head_height[env_ids] = 0.0
 
 
 def head_height(
@@ -91,7 +104,7 @@ def host_standup_progress(
 
 
 def reset_host_metrics(env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> None:
-  """Reset event: clear the per-environment stand-up progress (HoST ``reset_idx``)."""
+  """Reset event: snapshot episode-final progress, then clear the buffers."""
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
   HoSTMetrics.get().reset(env_ids)

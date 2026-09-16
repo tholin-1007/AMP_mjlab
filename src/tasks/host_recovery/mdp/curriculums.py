@@ -27,7 +27,9 @@ The port keeps the per-env state in :mod:`..mdp.pull_force` /
 ``_host_action_rescale`` but applies the decay from the mean over the resetting
 environments, because mjlab's curriculum terms are called with ``env_ids`` on
 reset only -- the observable behaviour (one global decay step per reset batch)
-is what a single-process run of HoST produces as well.
+is what a single-process run of HoST produces as well. Because mjlab's reset
+event clears the running metric before the curriculum runs, the episode-final
+height is first copied into ``HoSTMetrics.last_episode_head_height``.
 """
 
 from __future__ import annotations
@@ -67,9 +69,9 @@ def action_scale_decay(
 
   state = HoSTMetrics.get()
   reached = True
-  if state.initialized:
+  if state.initialized and state.last_episode_head_height is not None:
     reached = bool(
-      torch.mean(state.max_head_height[env_ids]) > threshold_height
+      torch.mean(state.last_episode_head_height[env_ids]) > threshold_height
     )
 
   rescale = getattr(env, "_host_action_rescale", None)

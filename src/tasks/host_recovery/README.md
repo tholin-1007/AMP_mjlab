@@ -87,6 +87,14 @@ src/tasks/host_recovery/
 
 8. `style_ground_parallel` 按 HoST 原样移植：它对**单个**踝部刚体求 `var(dim=1)`，
    在默认 `correction=1` 下是 NaN，随后的 `var < 0.05` 恒为 False，因此该项恒为
-   常数 0。仍然保留在奖励表里，以便与 HoST 配置逐项对应。
+   常数 0。仍然保留在奖励表里，以便与 HoST 配置逐项对应。代码上已补回
+   `[body_id]` 单例维度，避免索引结果降维后 `.var(dim=1)` 直接崩溃。
 9. `style_hip_yaw_deviation` / `style_hip_roll_deviation` / `style_knee_deviation`
    的判据写法（`max(|q|) > a or min(|q|) > b` 这类组合）照抄 HoST 原样。
+
+## 本次修正（sjw）
+
+- `style_ground_parallel` 保留 `[body_id]` 单例维度，修复训练时崩溃。
+- `HoSTMetrics` 在 reset 时先保存 `last_episode_head_height`，课程衰减改读该
+  快照，修复 reset 清空后 `action_scale` 永远无法下降的问题。
+- 观测表格把 “previous action” 改为 “current action”，与 HoST 源码一致。

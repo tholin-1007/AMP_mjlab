@@ -10,7 +10,7 @@ size    scale   content
 3       1.0     projected gravity
 23      1.0     joint positions (absolute, HoST convention)
 23      0.05    joint velocities
-23      1.0     previous action
+23      1.0     current action (HoST's ``self.actions`` at observation time)
 1       1.0     action rescaler (the training-wheel state from the curriculum)
 ======  ======  =============================================================
 

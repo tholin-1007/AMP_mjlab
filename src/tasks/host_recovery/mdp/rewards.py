@@ -338,12 +338,13 @@ def style_ground_parallel(
   i.e. the variance of a single element along dim 1, which is NaN for the
   default ``correction=1``; the following ``var < 0.05`` comparison is then
   False, so the term contributes ``0 * scale``. It is kept here so the reward
-  table still matches HoST's config 1:1.
+  table still matches HoST's config 1:1. The ``[body_id]`` brackets keep the
+  singleton dimension so ``var(dim=1)`` is well-defined.
   """
   asset: Entity = env.scene[left_ankle_cfg.name]
-  left_ankle_z = asset.data.body_link_pos_w[:, left_ankle_cfg.body_ids[0], 2] * 10.0
+  left_ankle_z = asset.data.body_link_pos_w[:, [left_ankle_cfg.body_ids[0]], 2] * 10.0
   right_ankle_z = (
-    asset.data.body_link_pos_w[:, right_ankle_cfg.body_ids[0], 2] * 10.0
+    asset.data.body_link_pos_w[:, [right_ankle_cfg.body_ids[0]], 2] * 10.0
   )
   variance = 0.5 * (left_ankle_z.var(dim=1) + right_ankle_z.var(dim=1))
   return variance < threshold
