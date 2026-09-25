@@ -121,7 +121,7 @@ src/tasks/host_recovery/
   快照，修复 reset 清空后 `action_scale` 永远无法下降的问题。
 - 观测表格把 “previous action” 改为 “current action”，与 HoST 源码一致。
 
-## 版本演进（V9–V12）
+## 版本演进（V9–A13）
 
 核心指标为站立期 11 个上肢关节速度 RMS（越低越丝滑）。验收条件统一为
 `action_scale=0.25`、零拉力、256 环境趴姿起立；各版本均保持 100% 完全站立、100% 直立。
@@ -132,6 +132,7 @@ src/tasks/host_recovery/
 | V10 | 1.915 | -68% | -68% | 加大动作变化率/加速度惩罚与上肢目标姿态权重，噪声 std 上界 `0.8→0.6` |
 | V11 | 0.953 | -50% | -84% | 新增 `regu_smoothness`，加大 `regu_dof_vel` 与软限位，噪声 std 上界 `0.6→0.5` |
 | V12 | 0.576 | -40% | -90% | 新增 `regu_upper_dof_vel` 定向压上肢，`regu_smoothness` `-0.05→-0.08` |
+| A13 | 1.159 | +101% | -80% | 恢复 HoST 增量关节位置动作，加强站起后目标项与腿部风格项（站立稳定/自然腿），上肢抖动回升 |
 
 分版本要点：
 
@@ -145,6 +146,14 @@ src/tasks/host_recovery/
   `regu_dof_pos_limits` `-100→-150`；噪声 std 上界 `0.6→0.5`。
 - **V12**：新增 `regu_upper_dof_vel=-2e-3`（只惩罚 11 个上肢关节）；`regu_smoothness`
   `-0.05→-0.08`。主要压低腕部滚动与肩部偏航的残余抖动。
+- **A13**：恢复 HoST 增量关节位置动作（`IncrementalJointPositionAction`，target=当前关节角+action×scale）；
+  `target_ang_vel_xy`/`target_lin_vel_xy` `10→16`、`target_feet_height_var` `2.5→6`、`target_upper_dof_pos` `10→25`、
+  `target_orientation`/`target_base_height` `10→16` 并收紧 sigma；腿风格 `style_knee_deviation` `-0.25→-1.5`、
+  `style_shank_orientation` `10→14`、`style_ground_parallel` `20→25`、`style_feet_distance` `-10→-14`；`nconmax` `35→128`。
+  以站立稳定与自然腿部为主，站立/直立保持 100%，但上肢 RMS 回升至 1.159。
 
 > V12 主训练在 10992 迭代时容器重启中断，从 `model_10000.pt` 用
 > `scripts/resume_finetune.py` 续训到 12000 迭代，课程固定在最终阶段。
+>
+> A13 主训练 4096 环境 0→12000 迭代一次跑完（未中断），课程固定在最终阶段
+> （`action_scale=0.25`、拉力 0），最终保存 `model_11999.pt`。
