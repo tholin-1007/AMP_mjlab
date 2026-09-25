@@ -11,7 +11,6 @@
 - 使用同一个 policy 同时学习 locomotion（走/跑）与 recovery（跌倒恢复）
 - 通过 AMP 判别器约束动作风格与运动先验
 - 在训练与导出链路中保持一致，支持直接导出 ONNX policy
-- 独立的 HoST 站立恢复任务（`Unitree-G1-HoST-StandUp`），从俯卧姿态学习自主站起并保持稳定
 
 ## 核心思路
 
@@ -79,7 +78,6 @@ python scripts/list_envs.py --keyword AMP
 
 - `Unitree-G1-AMP-Rough`
 - `Unitree-G1-AMP-Flat`
-- `Unitree-G1-HoST-StandUp`（见下文 HoST 站立恢复章节）
 
 ## 训练
 
@@ -111,34 +109,6 @@ python scripts/play.py Unitree-G1-AMP-Rough \
 
 说明：训练与回放阶段都支持 ONNX 导出（默认开启）。
 
-## HoST 站立恢复
-
-除统一的 AMP 策略外，本仓库还包含一个独立的站立恢复任务，从
-[OpenRobotLab/HoST](https://github.com/OpenRobotLab/HoST)（RSS 2025,
-*Learning Humanoid Standing-up Control across Diverse Postures*）迁移而来。
-
-- 任务：`Unitree-G1-HoST-StandUp`
-- 23 自由度 G1，平地，俯卧起始，学习自主站起并保持稳定
-- 复用 mjlab manager 架构、ONNX 导出与统一的 train/play 入口
-
-```bash
-python scripts/list_envs.py --keyword HoST
-python scripts/train.py Unitree-G1-HoST-StandUp --env.scene.num-envs=4096
-python scripts/play.py Unitree-G1-HoST-StandUp --checkpoint-file <ckpt>
-```
-
-无头评估、录制与续训：
-
-```bash
-CKPT=<checkpoint.pt> python scripts/eval_stand.py
-CKPT=<checkpoint.pt> python scripts/eval_stand_perjoint.py
-CKPT=<checkpoint.pt> python scripts/record_stand.py
-CKPT=<checkpoint.pt> LOG_DIR=<log_dir> python scripts/resume_finetune.py
-```
-
-迁移细节、已知差异与未迁移项见
-[`src/tasks/host_recovery/README.md`](src/tasks/host_recovery/README.md)。
-
 ## 运动数据准备
 
 仓库提供 CSV 到 NPZ 的转换脚本：
@@ -159,14 +129,8 @@ python scripts/csv_to_npz.py --help
 - `src/tasks/amp_loco`：AMP locomotion/recovery 任务实现
 - `src/tasks/amp_loco/config/g1`：G1 任务注册、环境与 RL 配置
 - `src/tasks/amp_loco/mdp`：奖励、观测、事件、终止逻辑
-- `src/tasks/host_recovery`：HoST 站立恢复任务实现
-- `src/tasks/host_recovery/config/g1`：G1 站起任务注册、环境与 RL 配置
-- `src/tasks/host_recovery/mdp`：站起奖励、观测、事件、课程
 - `scripts/train.py`：训练入口
 - `scripts/play.py`：回放入口
-- `scripts/eval_stand.py` / `scripts/eval_stand_perjoint.py`：无头站起评估
-- `scripts/record_stand.py`：无头站起视频录制
-- `scripts/resume_finetune.py`：站起续训
 - `scripts/csv_to_npz.py`：动作数据转换工具
 - `mjlab_patch`：依赖的 mjlab 本地补丁
 
@@ -175,11 +139,9 @@ python scripts/csv_to_npz.py --help
 - 单一策略统一覆盖走跑与跌倒恢复
 - AMP + 速度任务联合优化，兼顾风格与任务性能
 - 延迟重置与 recovery 采样机制，显式强化恢复能力
-- 独立 HoST 站起任务，从俯卧姿态学习站起并保持稳定
 - 训练到部署链路完整，支持 ONNX 导出
 
 ## 致谢
 
 - 感谢 [unitreerobotics/unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) 项目的开源工作与启发。
 - 感谢 [Open-X-Humanoid/TienKung-Lab](https://github.com/Open-X-Humanoid/TienKung-Lab)，本项目在 rsl_rl 的 AMP 部分参考了该实现。
-- 感谢 [OpenRobotLab/HoST](https://github.com/OpenRobotLab/HoST)，本项目的站立恢复任务迁移自该框架。
