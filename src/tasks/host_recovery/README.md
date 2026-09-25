@@ -16,6 +16,28 @@ python scripts/train.py Unitree-G1-HoST-StandUp --env.scene.num-envs=4096
 python scripts/play.py Unitree-G1-HoST-StandUp --checkpoint-file <ckpt>
 ```
 
+## 评估 / 录制 / 续训
+
+站立验收与可视化脚本（无头、`MUJOCO_GL=egl`）：
+
+```bash
+# 站立验收：平均高度、站立占比、直立占比、上肢速度 RMS
+CKPT=<checkpoint.pt> ACTION_SCALE=0.25 NUM_ENVS=256 STEPS=6000 python scripts/eval_stand.py
+
+# 分关节上肢速度 RMS 诊断
+CKPT=<checkpoint.pt> ACTION_SCALE=0.25 python scripts/eval_stand_perjoint.py
+
+# 录制起立-站立视频
+CKPT=<checkpoint.pt> ACTION_SCALE=0.25 python scripts/record_stand.py
+
+# 从 checkpoint 续训，课程固定在最终阶段（action_scale=0.25、拉力 0）
+CKPT=<checkpoint.pt> LOG_DIR=<log_dir> python scripts/resume_finetune.py
+```
+
+- `eval_stand.py` 输出的 `UPPER_JOINT_VEL_RMS` 是衡量站立时上肢抖动的核心指标，越低越顺滑。
+- `eval_stand_perjoint.py` 输出 11 个上肢关节的逐关节 RMS。
+- `resume_finetune.py` 会把课程钉在 `action_scale=0.25`、拉力 `0` 的最终阶段。
+
 ## 目录结构
 
 ```
@@ -98,3 +120,31 @@ src/tasks/host_recovery/
 - `HoSTMetrics` 在 reset 时先保存 `last_episode_head_height`，课程衰减改读该
   快照，修复 reset 清空后 `action_scale` 永远无法下降的问题。
 - 观测表格把 “previous action” 改为 “current action”，与 HoST 源码一致。
+
+## 版本演进（V9–V12）
+
+核心指标为站立期 11 个上肢关节速度 RMS（越低越丝滑）。验收条件统一为
+`action_scale=0.25`、零拉力、256 环境趴姿起立；各版本均保持 100% 完全站立、100% 直立。
+
+| 版本 | 上肢速度 RMS | 较上一版 | 较 V9 | 关键改动 |
+| --- | --- | --- | --- | --- |
+| V9 | 5.945 | — | — | 基线：先让策略能稳定站起 |
+| V10 | 1.915 | -68% | -68% | 加大动作变化率/加速度惩罚与上肢目标姿态权重，噪声 std 上界 `0.8→0.6` |
+| V11 | 0.953 | -50% | -84% | 新增 `regu_smoothness`，加大 `regu_dof_vel` 与软限位，噪声 std 上界 `0.6→0.5` |
+| V12 | 0.576 | -40% | -90% | 新增 `regu_upper_dof_vel` 定向压上肢，`regu_smoothness` `-0.05→-0.08` |
+
+分版本要点：
+
+- **V9**：动作噪声 std 上界钳到 `0.8`（根治 std 爆炸导致动作混乱/奖励崩塌）；
+  `pull_force` 增加 `force_when_down`（倒地才施力、直立撤力）；`standup` 的
+  `orientation_threshold=0.99`、`target_head_height=0.8`；`action_scale` 课程
+  `decay=0.005`（原 `0.02` 太快）；续训保存/恢复观测归一化器。
+- **V10**：`regu_action_rate` `-0.01→-0.05`，`regu_dof_acc` `-2.5e-7→-2.5e-6`，
+  `target_target_upper_dof_pos` `10→25`，噪声 std 上界 `0.8→0.6`。
+- **V11**：新增 `regu_smoothness=-0.05`；`regu_dof_vel` `-1e-3→-2e-3`；
+  `regu_dof_pos_limits` `-100→-150`；噪声 std 上界 `0.6→0.5`。
+- **V12**：新增 `regu_upper_dof_vel=-2e-3`（只惩罚 11 个上肢关节）；`regu_smoothness`
+  `-0.05→-0.08`。主要压低腕部滚动与肩部偏航的残余抖动。
+
+> V12 主训练在 10992 迭代时容器重启中断，从 `model_10000.pt` 用
+> `scripts/resume_finetune.py` 续训到 12000 迭代，课程固定在最终阶段。
