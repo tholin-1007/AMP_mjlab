@@ -98,7 +98,7 @@ def pull_force_decay(
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
 
   metrics = HoSTMetrics.get()
-  reached = True
+  reached = False
   if metrics.initialized and metrics.last_episode_head_height is not None:
     reached = bool(torch.mean(metrics.last_episode_head_height[env_ids]) > threshold_height)
   if reached:
@@ -133,16 +133,20 @@ def _resolve_wrench_writer(env: ManagerBasedRlEnv, body_name: str):
 
 def apply_pull_force(
   env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None = None,
   body_name: str = PULL_FORCE_BODY,
   no_orientation: bool = NO_ORIENTATION,
+  force_when_down: bool = False,
   unactuated_steps: int = 120,
 ) -> None:
   """Apply HoST's upward torso force for the current step.
 
   Faithful to ``LeggedRobot.step``: the force is zero while the motors are off,
-  and zero as well unless the base is still tipped over (HoST gates it on
-  ``projected_gravity[:, 2] < -0.8``).
+  and zero as well unless the base is already upright-ish (HoST gates it on
+  ``projected_gravity[:, 2] < -0.8``; in both Isaac Gym and mjlab the body-frame
+  gravity is ``(0, 0, -1)`` when upright and ``(0, 0, +1)`` when prone/supine).
   """
+  del env_ids  # step-mode events always pass ``None`` here.
   state = PullForceState.get()
   if state.force is None:
     return
@@ -152,13 +156,15 @@ def apply_pull_force(
   actuated = (env.episode_length_buf > unactuated_steps).float()
   force = force * actuated
   if not no_orientation:
-    tipped = (asset.data.projected_gravity_b[:, 2] < -0.8).float()
-    force = force * tipped
+    if force_when_down:
+      down = (asset.data.projected_gravity_b[:, 2] > -0.8).float()
+      force = force * down
+    else:
+      upright = (asset.data.projected_gravity_b[:, 2] < -0.8).float()
+      force = force * upright
 
-  writer, body_ids = _resolve_wrench_writer(env, body_name)
-  wrench = torch.zeros(env.num_envs, 6, device=env.device)
-  wrench[:, 2] = force
-  if body_ids is None:
-    writer(wrench)
-  else:
-    writer(wrench.unsqueeze(1), body_ids=body_ids)
+  body_ids = asset.find_bodies(body_name)[0]
+  forces = torch.zeros(env.num_envs, len(body_ids), 3, device=env.device)
+  forces[:, :, 2] = force.unsqueeze(-1)
+  torques = torch.zeros_like(forces)
+  asset.write_external_wrench_to_sim(forces, torques, body_ids=body_ids)

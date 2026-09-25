@@ -19,7 +19,6 @@ so the table stays auditable and nothing silently disappears.
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import dr
-from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -100,23 +99,22 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
   # Actions
   #
-  # NOTE: HoST's position target is incremental: ``target = dof_pos + action *
+  # HoST's position target is incremental: ``target = dof_pos + action *
   # action_rescale``, re-based on the measured position every step, so the PD
-  # error is always ``action * action_rescale``. mjlab's JointPositionAction
-  # instead targets ``default_joint_pos + scale * action``. The two are not
-  # equivalent; ``use_default_offset=True`` is kept because it is what every
-  # other task in this repository uses.
+  # error is always ``action * action_rescale`` and limb excursions accumulate
+  # across steps. ``mdp.IncrementalJointPositionAction`` restores that
+  # convention instead of mjlab's default-relative absolute target.
   #
   # ``scale`` starts at HoST's ``control.action_scale`` (= 1.0) and is decayed
   # to 0.25 by the ``action_scale`` curriculum term.
   ##
 
   actions = {
-    "joint_pos": JointPositionActionCfg(
+    "joint_pos": mdp.IncrementalJointPositionActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
       scale=1.0,
-      use_default_offset=True,
+      use_default_offset=False,
     ),
   }
 
@@ -151,7 +149,12 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     "init_pull_force": EventTermCfg(
       func=mdp.init_pull_force,
       mode="startup",
-      params={"force": 0.0},  # 0.0 = wheels off; see mdp/pull_force.py.
+      params={"force": mdp.PULL_FORCE},
+    ),
+    "apply_pull_force": EventTermCfg(
+      func=mdp.apply_pull_force,
+      mode="step",
+      params={"force_when_down": True},
     ),
     "foot_friction": EventTermCfg(
       mode="startup",
@@ -195,7 +198,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "group_weight": mdp.TASK_GROUP_WEIGHT,
         "orientation_threshold": 0.99,
-        "target_head_height": 1.0,
+        "target_head_height": 0.8,
         "target_head_margin": 1.0,
         "body_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
         "foot_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
@@ -204,20 +207,29 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     # ---------------- regu (group weight 0.1) ----------------
     "regu_dof_acc": RewardTermCfg(
       func=mdp.joint_acc_l2,
-      weight=-2.5e-7 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-2.5e-6 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
     ),
     "regu_action_rate": RewardTermCfg(
       func=mdp.action_rate_l2,
-      weight=-0.01 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-0.05 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+    ),
+    "regu_smoothness": RewardTermCfg(
+      func=mdp.action_acc_l2,
+      weight=-0.08 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
     ),
     "regu_dof_vel": RewardTermCfg(
       func=mdp.regu_dof_vel,
-      weight=-1e-3 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-2e-3 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "regu_upper_dof_vel": RewardTermCfg(
+      func=mdp.regu_upper_dof_vel,
+      weight=-2e-3 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=())},  # Set per-robot.
     ),
     "regu_dof_pos_limits": RewardTermCfg(
       func=mdp.joint_pos_limits,
-      weight=-100.0 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-150.0 * mdp.REGU_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
     ),
     # HoST regu_smoothness (-0.01): second-order action smoothness needs
     # ``last_last_actions``; mjlab only exposes ``last_action``.
@@ -236,12 +248,12 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "style_hip_yaw_deviation": RewardTermCfg(
       func=mdp.style_hip_yaw_deviation,
-      weight=-10.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-12.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*_hip_yaw_joint",))},
     ),
     "style_hip_roll_deviation": RewardTermCfg(
       func=mdp.style_hip_roll_deviation,
-      weight=-10.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-12.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*_hip_roll_joint",))},
     ),
     "style_shoulder_roll_deviation": RewardTermCfg(
@@ -270,12 +282,12 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "style_knee_deviation": RewardTermCfg(
       func=mdp.style_knee_deviation,
-      weight=-0.25 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-1.5 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*_knee_joint",))},
     ),
     "style_shank_orientation": RewardTermCfg(
       func=mdp.style_shank_orientation,
-      weight=10.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=14.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={
         "phase1_height": 0.45,
         "left_knee_cfg": SceneEntityCfg("robot", body_names=("left_knee_link",)),
@@ -286,7 +298,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "style_ground_parallel": RewardTermCfg(
       func=mdp.style_ground_parallel,
-      weight=20.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=25.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={
         "left_ankle_cfg": SceneEntityCfg("robot", body_names=("left_ankle_roll_link",)),
         "right_ankle_cfg": SceneEntityCfg("robot", body_names=("right_ankle_roll_link",)),
@@ -294,7 +306,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "style_feet_distance": RewardTermCfg(
       func=mdp.style_feet_distance,
-      weight=-10.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=-14.0 * mdp.STYLE_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={
         "left_foot_cfg": SceneEntityCfg("robot", body_names=("left_ankle_roll_link",)),
         "right_foot_cfg": SceneEntityCfg("robot", body_names=("right_ankle_roll_link",)),
@@ -308,17 +320,17 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     # ---------------- target (group weight 1.0) ----------------
     "target_ang_vel_xy": RewardTermCfg(
       func=mdp.target_ang_vel_xy,
-      weight=10.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=16.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={"phase3_height": 0.65},
     ),
     "target_lin_vel_xy": RewardTermCfg(
       func=mdp.target_lin_vel_xy,
-      weight=10.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=16.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={"phase3_height": 0.65},
     ),
     "target_feet_height_var": RewardTermCfg(
       func=mdp.target_feet_height_var,
-      weight=2.5 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=6.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={
         "phase3_height": 0.65,
         "left_foot_cfg": SceneEntityCfg("robot", body_names=("left_ankle_roll_link",)),
@@ -327,7 +339,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "target_target_upper_dof_pos": RewardTermCfg(
       func=mdp.target_target_upper_dof_pos,
-      weight=10.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      weight=25.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
       params={
         "phase3_height": 0.65,
         "asset_cfg": SceneEntityCfg("robot", joint_names=()),  # Set per-robot.
@@ -338,13 +350,13 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "target_target_orientation": RewardTermCfg(
       func=mdp.target_target_orientation,
-      weight=10.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
-      params={"phase3_height": 0.65},
+      weight=16.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      params={"phase3_height": 0.65, "sigma": -8.0},
     ),
     "target_target_base_height": RewardTermCfg(
       func=mdp.target_target_base_height,
-      weight=10.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
-      params={"base_height_target": 0.75, "phase3_height": 0.65},
+      weight=16.0 * mdp.TARGET_GROUP_WEIGHT * mdp.HOST_CONSTRAINT_DT,
+      params={"base_height_target": 0.75, "phase3_height": 0.65, "sigma": -25.0},
     ),
   }
 
@@ -375,13 +387,12 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
   curriculum = {
     "action_scale": CurriculumTermCfg(
       func=mdp.action_scale_decay,
-      params={"threshold_height": 0.9, "decay": 0.02, "min_scale": 0.25},
+      params={"threshold_height": mdp.THRESHOLD_HEIGHT, "decay": 0.005, "min_scale": 0.25},
     ),
-    # Enable together with init_pull_force once mdp/pull_force.py has a hook.
-    # "pull_force": CurriculumTermCfg(
-    #   func=mdp.pull_force_decay,
-    #   params={"threshold_height": 0.9, "decay": 20.0},
-    # ),
+    "pull_force": CurriculumTermCfg(
+      func=mdp.pull_force_decay,
+      params={"threshold_height": mdp.THRESHOLD_HEIGHT, "decay": 20.0},
+    ),
   }
 
   ##
@@ -410,7 +421,7 @@ def make_host_recovery_env_cfg() -> ManagerBasedRlEnvCfg:
       azimuth=90.0,
     ),
     sim=SimulationCfg(
-      nconmax=35,
+      nconmax=128,
       njmax=1500,
       mujoco=MujocoCfg(
         timestep=0.005,

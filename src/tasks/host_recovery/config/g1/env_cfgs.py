@@ -39,8 +39,9 @@ HOST_TARGET_UPPER_DOF_POS = (0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0, -0.3, 0.0, 0.0, 
 
 #: HoST ``control.action_scale``; the ``action_scale`` curriculum decays it.
 HOST_ACTION_SCALE = 1.0
-#: HoST ``play.py`` pins the rescaler at 0.3 for evaluation.
-HOST_PLAY_ACTION_SCALE = 0.3
+#: Play pins the rescaler at the curriculum floor so evaluation matches the
+#: final training regime (HoST's own play value is 0.3; ours decays to 0.25).
+HOST_PLAY_ACTION_SCALE = 0.25
 
 
 def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -98,6 +99,9 @@ def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["target_target_upper_dof_pos"].params["asset_cfg"] = SceneEntityCfg(
     "robot", joint_names=UPPER_BODY_JOINTS
   )
+  cfg.rewards["regu_upper_dof_vel"].params["asset_cfg"] = SceneEntityCfg(
+    "robot", joint_names=UPPER_BODY_JOINTS
+  )
   cfg.rewards["target_target_upper_dof_pos"].params["target_upper_dof_pos"] = (
     HOST_TARGET_UPPER_DOF_POS
   )
@@ -139,7 +143,11 @@ def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.curriculum = {}
     cfg.observations["actor"].terms["host"].params["add_noise"] = False
     cfg.actions["joint_pos"].scale = HOST_PLAY_ACTION_SCALE
-    # Demo the paper's "diverse postures": sample the start pose randomly.
-    cfg.events["reset_base"].params["posture"] = None
+    # Evaluation runs without HoST's pull-force training wheel.
+    cfg.events.pop("init_pull_force", None)
+    cfg.events.pop("apply_pull_force", None)
+    # Evaluate from the same prone start used during training; the paper's
+    # "diverse postures" evaluation needs a policy trained on diverse postures.
+    cfg.events["reset_base"].params["posture"] = "prone"
 
   return cfg

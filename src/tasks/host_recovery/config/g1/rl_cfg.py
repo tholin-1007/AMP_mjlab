@@ -24,7 +24,7 @@ def unitree_g1_host_standup_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       distribution_cfg={
         "class_name": "GaussianDistribution",
         "init_std": 0.8,
-        "std_type": "scalar",
+        "std_type": "per_dim",
       },
     ),
     critic=RslRlModelCfg(
@@ -50,4 +50,6 @@ def unitree_g1_host_standup_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     save_interval=500,
     num_steps_per_env=50,
     max_iterations=12000,
+    upload_model=False,
+    clip_actions=None,
   )

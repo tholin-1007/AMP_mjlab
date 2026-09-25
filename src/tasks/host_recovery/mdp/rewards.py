@@ -127,6 +127,18 @@ def regu_dof_vel(
   return torch.sum(torch.square(asset.data.joint_vel), dim=1)
 
 
+def regu_upper_dof_vel(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=()),
+) -> torch.Tensor:
+  """Penalise velocities of the selected upper-body joints (anti-tremor)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  ids = asset_cfg.joint_ids
+  if len(ids) == 0:
+    return torch.zeros_like(asset.data.joint_vel[:, 0])
+  return torch.sum(torch.square(asset.data.joint_vel[:, ids]), dim=1)
+
+
 ##
 # style group -- motion style on the ground (HoST group weight 1.0).
 #

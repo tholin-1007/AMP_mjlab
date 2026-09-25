@@ -44,7 +44,7 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 #: HoST ``curriculum.threshold_height``.
-THRESHOLD_HEIGHT = 0.9
+THRESHOLD_HEIGHT = 0.7
 #: HoST's decay increments and floors.
 ACTION_SCALE_DECAY = 0.02
 ACTION_SCALE_MIN = 0.25
@@ -68,7 +68,7 @@ def action_scale_decay(
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
 
   state = HoSTMetrics.get()
-  reached = True
+  reached = False
   if state.initialized and state.last_episode_head_height is not None:
     reached = bool(
       torch.mean(state.last_episode_head_height[env_ids]) > threshold_height
@@ -92,4 +92,8 @@ def action_scale_decay(
     term.cfg.scale = {key: new_value for key in scale_cfg}
   else:
     term.cfg.scale = new_value
+  if isinstance(term._scale, torch.Tensor):
+    term._scale[:] = new_value
+  else:
+    term._scale = new_value
   return rescale.mean()

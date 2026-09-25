@@ -21,10 +21,9 @@ per-term noise/scale mechanism. The actor group in
 ``host_recovery_env_cfg.py`` therefore declares a single term and sets
 ``enable_corruption=False`` so mjlab does not add its own noise on top.
 
-NOTE: mjlab expects joint positions relative to the default pose
-(``joint_pos_rel``); HoST feeds raw absolute joint positions. This port feeds
-``asset.data.joint_pos - default_joint_pos`` and notes the difference rather
-than changing the robot's default pose, which the robot config owns.
+NOTE: HoST feeds raw absolute joint positions (``dof_pos``). This port follows
+that convention with ``asset.data.joint_pos`` rather than mjlab's
+default-relative ``joint_pos_rel``.
 """
 
 from __future__ import annotations
@@ -95,14 +94,14 @@ def host_observation(
   """
   asset: Entity = env.scene[asset_cfg.name]
 
-  joint_pos = (asset.data.joint_pos - asset.data.default_joint_pos) * DOF_POS_SCALE
+  joint_pos = asset.data.joint_pos * DOF_POS_SCALE
   obs = torch.cat(
     (
       asset.data.root_link_ang_vel_b * ANG_VEL_SCALE,
       asset.data.projected_gravity_b,
       joint_pos,
       asset.data.joint_vel * DOF_VEL_SCALE,
-      env.action_manager.get_term("joint_pos").action,
+      env.action_manager.get_term("joint_pos").raw_action,
       _get_action_rescale(env),
     ),
     dim=-1,
