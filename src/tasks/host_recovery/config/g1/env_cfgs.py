@@ -6,6 +6,8 @@ wrist_roll). ``src.assets.robots.G1_23DOF_ACTION_SCALE``, ``get_g1_23dof_robot_c
 mjlab MJCF all agree with that joint set and with HoST's joint ordering.
 """
 
+import os
+
 from src.assets.robots import get_g1_23dof_robot_cfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -135,6 +137,18 @@ def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.actions["joint_pos"].scale = HOST_ACTION_SCALE
 
   ##
+  # Start posture.
+  #
+  # HoST's ground task starts prone. The supine variant is selected with
+  # ``HOST_POSTURE=supine`` so that train / play / eval / resume all agree
+  # on the same start without anyone editing this file.
+  ##
+
+  cfg.events["reset_base"].params["posture"] = os.environ.get(
+    "HOST_POSTURE", "prone"
+  )
+
+  ##
   # Play mode overrides, mirroring HoST's ``play.py``.
   ##
 
@@ -146,8 +160,8 @@ def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Evaluation runs without HoST's pull-force training wheel.
     cfg.events.pop("init_pull_force", None)
     cfg.events.pop("apply_pull_force", None)
-    # Evaluate from the same prone start used during training; the paper's
-    # "diverse postures" evaluation needs a policy trained on diverse postures.
-    cfg.events["reset_base"].params["posture"] = "prone"
+    # The start posture is set above from ``HOST_POSTURE``, so evaluation uses
+    # the same posture the policy was trained on (the paper's "diverse
+    # postures" evaluation needs a policy trained on diverse postures).
 
   return cfg
