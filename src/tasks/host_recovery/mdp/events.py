@@ -36,13 +36,28 @@ _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 #: HoST ``init_state.pos[2]``.
 DEFAULT_HEIGHT = 0.5
 
-#: HoST ``init_state.rot = [0.0, -1, 0, 1.0]`` in ``(x, y, z, w)``.
-#: mjlab uses ``(w, x, y, z)``; a 180 deg turn about ``y`` is the same rotation
-#: for either sign of the axis, hence ``(0, 0, 1, 0)``.
-PRONE_QUAT = (0.0, 0.0, 1.0, 0.0)
-SUPINE_QUAT = (0.0, 1.0, 0.0, 0.0)
-LEFT_SIDE_QUAT = (0.7071067811865476, 0.0, 0.7071067811865476, 0.0)
-RIGHT_SIDE_QUAT = (0.7071067811865476, 0.0, -0.7071067811865476, 0.0)
+
+#: ``cos(45 deg) = sin(45 deg) = sqrt(2)/2``; a quarter turn about a unit
+#: axis reads ``(cos45, sin45 * axis)`` in mjlab's ``(w, x, y, z)`` order.
+_S = 0.7071067811865476
+
+# The G1 ``pelvis`` body has identity orientation in the MJCF, so while the
+# robot stands upright its body frame (``x`` forward, ``y`` left, ``z`` up)
+# coincides with the world frame. Every posture below is a single quarter
+# turn off upright, which is what lays the robot flat on the floor:
+#   prone      -- +90 deg about ``y``: body ``+x`` (chest) points down.
+#   supine     -- -90 deg about ``y``: body ``+x`` (chest) points up.
+#   left_side  -- -90 deg about ``x``: body ``+y`` (left) points down.
+#   right_side -- +90 deg about ``x``: body ``+y`` (left) points up.
+#
+# HoST writes ``init_state.rot = [0.0, -1, 0, 1.0]`` in ``(x, y, z, w)``,
+# which normalises to a *quarter* turn, not the half turn the previous values
+# here encoded: ``(0, 0, 1, 0)`` is 180 deg about ``y``, i.e. head straight
+# down, so every episode used to start upside down.
+PRONE_QUAT = (_S, 0.0, _S, 0.0)
+SUPINE_QUAT = (_S, 0.0, -_S, 0.0)
+LEFT_SIDE_QUAT = (_S, -_S, 0.0, 0.0)
+RIGHT_SIDE_QUAT = (_S, _S, 0.0, 0.0)
 
 POSTURE_QUATS: dict[str, tuple[float, float, float, float]] = {
   "prone": PRONE_QUAT,
