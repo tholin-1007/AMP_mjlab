@@ -144,8 +144,12 @@ def unitree_g1_host_standup_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # on the same start without anyone editing this file.
   ##
 
-  cfg.events["reset_base"].params["posture"] = os.environ.get(
-    "HOST_POSTURE", "prone"
+  # ``none`` selects the paper's "diverse postures" setting: every episode is
+  # reset from a uniformly random corner, which is what makes the policy able
+  # to recover after being knocked over rather than only from one start.
+  posture_env = os.environ.get("HOST_POSTURE", "prone")
+  cfg.events["reset_base"].params["posture"] = (
+    None if posture_env == "none" else posture_env
   )
 
   ##
