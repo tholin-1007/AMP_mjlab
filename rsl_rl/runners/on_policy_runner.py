@@ -51,6 +51,7 @@ def _migrate_train_cfg(train_cfg: dict) -> None:
             "actor_hidden_dims": list(actor_cfg.get("hidden_dims", [256, 256, 256])),
             "critic_hidden_dims": list(critic_cfg.get("hidden_dims", [256, 256, 256])),
             "activation": actor_cfg.get("activation", "elu"),
+            "action_output_activation": actor_cfg.get("action_output_activation", "none"),
         }
         dist_cfg = actor_cfg.get("distribution_cfg") or {}
         if dist_cfg:
