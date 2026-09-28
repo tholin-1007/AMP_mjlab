@@ -38,6 +38,7 @@ class ActorCritic(nn.Module):
         activation="elu",
         init_noise_std=1.0,
         noise_std_type: str = "scalar",
+        action_output_activation: str = "none",
         **kwargs,
     ):
         if kwargs:
@@ -57,6 +58,8 @@ class ActorCritic(nn.Module):
         for layer_index in range(len(actor_hidden_dims)):
             if layer_index == len(actor_hidden_dims) - 1:
                 actor_layers.append(nn.Linear(actor_hidden_dims[layer_index], num_actions))
+                if action_output_activation != "none":
+                    actor_layers.append(resolve_nn_activation(action_output_activation))
             else:
                 actor_layers.append(nn.Linear(actor_hidden_dims[layer_index], actor_hidden_dims[layer_index + 1]))
                 actor_layers.append(activation)
@@ -81,10 +84,15 @@ class ActorCritic(nn.Module):
         self.noise_std_type = noise_std_type
         if self.noise_std_type == "scalar":
             self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        elif self.noise_std_type == "per_dim":
+            self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         elif self.noise_std_type == "log":
             self.log_std = nn.Parameter(torch.log(init_noise_std * torch.ones(num_actions)))
         else:
-            raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
+            raise ValueError(
+                f"Unknown standard deviation type: {self.noise_std_type}. "
+                "Should be 'scalar', 'per_dim' or 'log'"
+            )
 
         # Action distribution (populated in update_distribution)
         self.distribution = None
@@ -122,11 +130,16 @@ class ActorCritic(nn.Module):
         mean = self.actor(observations)
         # compute standard deviation
         if self.noise_std_type == "scalar":
-            std = torch.clamp_min(self.std, 1.0e-6).expand_as(mean)
+            std = torch.clamp(self.std, 1.0e-6, 0.5).expand_as(mean)
+        elif self.noise_std_type == "per_dim":
+            std = torch.clamp(self.std, 1.0e-6, 0.5)
         elif self.noise_std_type == "log":
             std = torch.clamp_min(torch.exp(self.log_std), 1.0e-6).expand_as(mean)
         else:
-            raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
+            raise ValueError(
+                f"Unknown standard deviation type: {self.noise_std_type}. "
+                "Should be 'scalar', 'per_dim' or 'log'"
+            )
         # create distribution
         self.distribution = Normal(mean, std)
 
