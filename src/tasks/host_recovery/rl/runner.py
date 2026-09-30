@@ -194,11 +194,14 @@ class HoSTOnPolicyRunner(MjlabOnPolicyRunner):
     policy_path = path.split("model")[0]
     filename = "policy.onnx"
     self.export_policy_to_onnx(policy_path, filename)
+    logger_type = getattr(
+      self, "logger_type", self.cfg.get("logger", "tensorboard")
+    ).lower()
     run_name: str = (
-      wandb.run.name if self.logger_type == "wandb" and wandb.run else "local"
+      wandb.run.name if logger_type == "wandb" and wandb.run else "local"
     )  # type: ignore[assignment]
     onnx_path = os.path.join(policy_path, filename)
     metadata = get_base_metadata(self.env.unwrapped, run_name)
     attach_metadata_to_onnx(onnx_path, metadata)
-    if self.logger_type in ["wandb"]:
+    if logger_type in ["wandb"]:
       wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
