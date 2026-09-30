@@ -146,9 +146,9 @@ def main() -> None:
       print("A6_FULL_EPISODE_PREFLIGHT_OK", flush=True)
       return
 
-    runner.save(str(args.log_dir / "initial.pt"))
+    runner.save(str(args.log_dir / "model_0.pt"))
     runner.learn(num_learning_iterations=args.updates, init_at_random_ep_len=False)
-    runner.save(str(args.log_dir / "final.pt"))
+    runner.save(str(args.log_dir / f"model_{args.updates}_final.pt"))
     print("A6_TRAINING_DONE", args.arm, flush=True)
   finally:
     env.close()
