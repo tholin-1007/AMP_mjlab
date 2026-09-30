@@ -56,10 +56,8 @@ def _plate_spec(*, free: bool, body_name: str, geom_name: str) -> Any:
   if free:
     body.add_freejoint(name=f"{body_name}_joint")
   else:
-    # Historical A6 uses a passive vertical slide.  A mocap body is not
-    # equivalent: it has no mass response and cannot be lifted by the robot.
     body.add_joint(
-      name="escape_plate_slide",
+      name=f"{body_name}_slide",
       type=mujoco.mjtJoint.mjJNT_SLIDE,
       axis=(0.0, 0.0, 1.0),
       limited=True,
@@ -92,7 +90,7 @@ def guided_plate_spec() -> Any:
 
 def free_plate_spec() -> Any:
   """Return the free-jointed historical plate entity."""
-  return _plate_spec(free=True, body_name="free_plate", geom_name="plate_geom")
+  return _plate_spec(free=True, body_name="plate", geom_name="plate_geom")
 
 
 def quotas(num_envs: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
