@@ -1104,7 +1104,7 @@ def _a6_phase_update(env, env_ids=None):
   env._a6_invalid = active & (
     (depth < -0.02)
     | (force > 1500.0)
-    | ((env.episode_length_buf > 25) & ~env._a6_ever_contact)
+    | (which & (env.episode_length_buf > 25) & ~env._a6_ever_contact)
   )
 
 
@@ -1695,6 +1695,11 @@ def a6_reset(
 
   _park_and_place_plates(env, env_ids)
   _clear_a6_runtime_buffers(env, env_ids)
+
+  # A vertically guided overhead board constrains the path before literal
+  # contact; only the free board uses contact-based eligibility and the
+  # 25-step missing-contact invalid guard.
+  env._a6_ever_contact[env_ids] = env._a6_scene[env_ids] == 1
 
   coverage, score, clearance = _plate_geometry(env)
   env._a6_best_score[env_ids] = score[env_ids]

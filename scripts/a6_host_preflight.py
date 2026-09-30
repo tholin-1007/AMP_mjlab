@@ -117,6 +117,10 @@ def main() -> int:
     assert tuple(obs["actor"].shape) == (args.num_envs, 564), obs["actor"].shape
     assert tuple(obs["critic"].shape) == (args.num_envs, 564), obs["critic"].shape
     assert env.sim.data.qvel.abs().max() < 1e-6
+    guided_ids = env._a6_scene == 1
+    free_ids = env._a6_scene == 2
+    assert env._a6_ever_contact[guided_ids].all()
+    assert not env._a6_ever_contact[free_ids].any()
 
     counts = a6_reset_counts(env)
     n = args.num_envs
