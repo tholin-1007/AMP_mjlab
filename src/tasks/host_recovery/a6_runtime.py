@@ -31,6 +31,7 @@ import numpy as np
 import torch
 
 from mjlab.entity import EntityCfg
+from mjlab.envs.mdp import push_by_setting_velocity
 from mjlab.envs.mdp.rewards import joint_pos_limits
 from mjlab.managers.event_manager import (
   EventTermCfg,
@@ -86,9 +87,10 @@ HAND_COLLISION_PATTERN = r"(left|right)_hand_collision$"
 #: Board placement gap above the highest covered robot geom, in metres.
 PLATE_GROUND_CLEARANCE = 0.002
 
-#: Dynamics layer, matched to HoST's PPO ``num_steps_per_env=50``.
-A6_STEPS_PER_UPDATE = 50
+#: Dynamics layer, matched to the A6 PPO ``num_steps_per_env=24``.
+A6_STEPS_PER_UPDATE = 24
 A6_DYNAMICS_WARMUP_UPDATES = 2000
+PLATE_MASS_RAMP_STEPS = 100_000
 #: 25% of episodes keep nominal mass/gains/delay.
 A6_NOMINAL_FRACTION = 0.25
 #: Six 2 ms physics-substep slots cover 0/2/4/6/8/10 ms command delay.
@@ -484,6 +486,29 @@ def a6_env_cfg(
   cfg.events["a6_phase"] = EventTermCfg(
     func=_a6_phase_update, mode="step", params={}
   )
+  if play:
+    cfg.events.pop("push_robot", None)
+  else:
+    cfg.events["push_robot"] = EventTermCfg(
+      func=push_by_setting_velocity,
+      mode="interval",
+      interval_range_s=(1.0, 3.0),
+      params={
+        "velocity_range": {
+          "x": (-0.5, 0.5),
+          "y": (-0.5, 0.5),
+          "z": (-0.4, 0.4),
+          "roll": (-0.52, 0.52),
+          "pitch": (-0.52, 0.52),
+          "yaw": (-0.78, 0.78),
+        }
+      },
+    )
+
+  # The paired HoST arms retain the method's auxiliary pull curriculum, but its
+  # update clock must match this protocol's 24-step PPO rollout.
+  if "pull_force" in cfg.curriculum:
+    cfg.curriculum["pull_force"].params["steps_per_update"] = A6_STEPS_PER_UPDATE
 
   # Replace overlapping flat29/HoST terms explicitly instead of silently
   # double-counting them next to the shared A6 task/cost block.
@@ -681,6 +706,18 @@ def _ensure_a6_state(env: "ManagerBasedRlEnv") -> None:
   env._a6_plate_geoms = torch.stack(
     [env._a6_guided_geom.squeeze(), env._a6_free_geom.squeeze()]
   )
+  guided_body_local, _ = guided.find_bodies(
+    ["escape_plate"], preserve_order=True
+  )
+  free_body_local, _ = free.find_bodies(["plate"], preserve_order=True)
+  if len(guided_body_local) != 1 or len(free_body_local) != 1:
+    raise RuntimeError("A6 plate body names were not compiled")
+  env._a6_plate_bodies = torch.stack(
+    [
+      guided.indexing.body_ids[guided_body_local[0]],
+      free.indexing.body_ids[free_body_local[0]],
+    ]
+  ).long()
 
   # Dynamics-grouped body and actuator indices.  The body grouping follows
   # balanced_dynamics: legs (0), upper subtree (1), pelvis/waist (2); column 3
@@ -800,6 +837,7 @@ def _ensure_a6_state(env: "ManagerBasedRlEnv") -> None:
   env._a6_mass_factors = torch.ones((num_envs, 4), device=device)
   env._a6_gain_factors = torch.ones((num_envs, 6), device=device)
   env._a6_nominal = torch.ones(num_envs, dtype=torch.bool, device=device)
+  env._a6_plate_mass = torch.full((num_envs,), 6.0, device=device)
 
   env._a6_initialized = True
 
@@ -1450,7 +1488,9 @@ def a6_dynamics_reset(
 
   device = env.device
   num_ids = len(env_ids)
-  update_count = env.common_step_counter / A6_STEPS_PER_UPDATE
+  adaptation_start = int(getattr(env, "_a6_adaptation_start_step", 0))
+  adaptation_steps = max(int(env.common_step_counter) - adaptation_start, 0)
+  update_count = adaptation_steps / A6_STEPS_PER_UPDATE
   width = 0.1 + 0.1 * min(
     update_count / A6_DYNAMICS_WARMUP_UPDATES, 1.0
   )
@@ -1476,10 +1516,19 @@ def a6_dynamics_reset(
     gain_factors = torch.ones((num_ids, 6), device=device)
     lag = torch.zeros(num_ids, dtype=torch.long, device=device)
 
+  if dynamics:
+    plate_mass_max = 6.0 + 6.0 * min(
+      adaptation_steps / PLATE_MASS_RAMP_STEPS, 1.0
+    )
+    plate_mass = 4.0 + (plate_mass_max - 4.0) * rand((num_ids,))
+  else:
+    plate_mass = torch.full((num_ids,), 6.0, device=device)
+
   env._a6_mass_factors[env_ids] = mass_factors
   env._a6_gain_factors[env_ids] = gain_factors
   env._a6_nominal[env_ids] = ~enabled
   env._a6_lag[env_ids] = torch.where(enabled, lag, 0)
+  env._a6_plate_mass[env_ids] = plate_mass
 
   bodies = env._a6_bodies
   body_scale = mass_factors[:, env._a6_body_groups]
@@ -1507,6 +1556,17 @@ def a6_dynamics_reset(
       kd_factor=per_target,
     )
 
+  plate_bodies = env._a6_plate_bodies
+  default_plate_mass = env.sim.get_default_field("body_mass")[plate_bodies]
+  plate_scale = plate_mass[:, None] / default_plate_mass[None]
+  env.sim.model.body_mass[env_ids[:, None], plate_bodies[None, :]] = (
+    default_plate_mass[None] * plate_scale
+  )
+  default_plate_inertia = env.sim.get_default_field("body_inertia")[plate_bodies]
+  env.sim.model.body_inertia[env_ids[:, None], plate_bodies[None, :]] = (
+    default_plate_inertia[None] * plate_scale[:, :, None]
+  )
+
 
 def a6_audit_dynamics(env: "ManagerBasedRlEnv") -> dict[str, bool]:
   """Validate the dynamics layer against stored per-world randomisation."""
@@ -1523,6 +1583,12 @@ def a6_audit_dynamics(env: "ManagerBasedRlEnv") -> dict[str, bool]:
   )
   assert torch.allclose(env.sim.model.body_mass[:, bodies], expected_mass)
   assert torch.allclose(env.sim.model.body_inertia[:, bodies], expected_inertia)
+
+  plate_bodies = env._a6_plate_bodies
+  expected_plate_mass = env._a6_plate_mass[:, None].expand(-1, 2)
+  assert torch.allclose(
+    env.sim.model.body_mass[:, plate_bodies], expected_plate_mass
+  )
 
   robot = env.scene["robot"]
   default_gainprm = env.sim.get_default_field("actuator_gainprm")
@@ -1595,6 +1661,7 @@ def a6_audit_dynamics(env: "ManagerBasedRlEnv") -> dict[str, bool]:
     "actuator_gain_verified": True,
     "effort_caps_unchanged": True,
     "delay_0_to_10ms_verified": True,
+    "plate_mass_verified": True,
   }
 
 

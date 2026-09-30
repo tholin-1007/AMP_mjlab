@@ -141,6 +141,7 @@ def main() -> int:
     assert dynamics_audit["actuator_gain_verified"]
     assert dynamics_audit["effort_caps_unchanged"]
     assert dynamics_audit["delay_0_to_10ms_verified"]
+    assert dynamics_audit["plate_mass_verified"]
 
     low_ids = torch.nonzero(env._a6_stratum == 0, as_tuple=False).flatten()
     inferred = _direction_from_gravity(robot.data.projected_gravity_b)
@@ -221,6 +222,8 @@ def main() -> int:
       env._a6_mass_factors[:, 3],
       torch.ones(n, device=env.device),
     )
+    assert env._a6_plate_mass.min() >= 4.0
+    assert env._a6_plate_mass.max() <= 12.0
     env.common_step_counter = saved_counter
 
     # Restore a coherent full state, then run a short finite rollout through the

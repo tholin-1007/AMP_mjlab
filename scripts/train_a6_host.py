@@ -96,9 +96,10 @@ def main() -> None:
     runner = HoSTOnPolicyRunner(wrapper, asdict(agent), str(args.log_dir), "cuda:0")
     runner.load(str(args.checkpoint), load_optimizer=True, map_location="cuda:0")
     # A6 is a new adaptation clock; retain native policy/normalizers/optimizer,
-    # but do not inherit the flat pretraining update number or curricula time.
+    # but do not inherit the flat pretraining update number for A6 dynamics.
+    # The HoST environment clock and auxiliary curriculum state remain native.
     runner.current_learning_iteration = 0
-    env.common_step_counter = 0
+    env._a6_adaptation_start_step = int(env.common_step_counter)
     action = runner.get_inference_policy(device="cuda:0")
     observations = wrapper.get_observations()
     with torch.inference_mode():
@@ -113,6 +114,9 @@ def main() -> None:
       "method": "existing native 29-joint HoST port (single-critic PPO; not full paper HoST)",
       "checkpoint_state": "actor, critic, optimizer and observation normalizers retained",
       "adaptation_clock_reset": True,
+      "a6_adaptation_start_step": env._a6_adaptation_start_step,
+      "native_env_step_counter_retained": int(env.common_step_counter),
+      "host_auxiliary_curriculum_retained": True,
       "num_envs": args.num_envs,
       "updates": args.updates,
       "seed": args.seed,
