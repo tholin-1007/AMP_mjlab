@@ -90,6 +90,7 @@ def main() -> None:
   try:
     assert abs(env.physics_dt - 0.002) < 1e-9
     assert abs(env.step_dt - 0.02) < 1e-9
+    env.reset()
     reset_audit = audit_reset(env)
     wrapper = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
     runner = HoSTOnPolicyRunner(wrapper, asdict(agent), str(args.log_dir), "cuda:0")
