@@ -10,7 +10,7 @@ The protocol requires:
 - low/middle/near-standing reset strata of 70/20/10;
 - four balanced low postures, with 75% natural and 25% procedural low states;
 - the exact three reset banks and SHA256 values in `a6_protocol.yaml`;
-- 0.02 s control steps, 0.005 s physics steps, ten physics substeps;
+- 0.02 s control steps, 0.002 s physics steps, ten physics substeps;
 - common task, execution cost, Q/L cost, and escape terms from the A6 table;
 - paired `G-` and `G+` runs from the same native HoST checkpoint.
 

@@ -7,7 +7,7 @@ protocol:
   name: historical-a6-stage3-host
   source_commit: 1b6d7e61ddbcd2caf9ea17b02160dd1cf0d119d2
   control_dt: 0.02
-  physics_dt: 0.005
+  physics_dt: 0.002
   physics_substeps: 10
   episode_seconds: 10.0
   num_envs: 4096

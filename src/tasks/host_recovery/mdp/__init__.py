@@ -7,6 +7,8 @@ term through ``mdp.``; the modules below add HoST's standing-up specific terms.
 from mjlab.envs.mdp import *  # noqa: F401, F403
 
 from .actions import *  # noqa: F401, F403
+from .a6_actions import *  # noqa: F401, F403
+from .a6_runtime import *  # noqa: F401, F403
 from .host_math import *  # noqa: F401, F403
 from .curriculums import *  # noqa: F401, F403
 from .events import *  # noqa: F401, F403
