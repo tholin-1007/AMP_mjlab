@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -38,6 +39,18 @@ def sha256(path: Path) -> str:
   return digest.hexdigest()
 
 
+def tensor_state_sha256(state: dict[str, torch.Tensor]) -> str:
+  """Stable digest for an in-memory module state dict."""
+  digest = hashlib.sha256()
+  for name in sorted(state):
+    value = state[name].detach().cpu().contiguous()
+    digest.update(name.encode("utf-8"))
+    digest.update(str(value.dtype).encode("ascii"))
+    digest.update(str(tuple(value.shape)).encode("ascii"))
+    digest.update(value.numpy().tobytes())
+  return digest.hexdigest()
+
+
 def audit_reset(env: ManagerBasedRlEnv) -> dict:
   counts = a6_reset_counts(env)
   if float(env.sim.data.qvel.abs().max()) >= 1e-6:
@@ -64,6 +77,21 @@ def main() -> None:
   parser.add_argument("--num-envs", type=int, default=4096)
   parser.add_argument("--updates", type=int, default=10000)
   parser.add_argument("--seed", type=int, default=20261013)
+  parser.add_argument("--learning-rate", type=float, default=1.0e-4)
+  parser.add_argument("--entropy-coef", type=float, default=0.0)
+  parser.add_argument("--noise-std", type=float, default=0.8)
+  parser.add_argument("--max-noise-std", type=float, default=0.8)
+  parser.add_argument("--save-interval", type=int, default=500)
+  parser.add_argument(
+    "--train-action-std",
+    action="store_true",
+    help="Allow PPO to optimize exploration std; V4 freezes it by default.",
+  )
+  parser.add_argument(
+    "--update-actor-normalizer",
+    action="store_true",
+    help="Update the inherited actor normalizer; V4 freezes it by default.",
+  )
   parser.add_argument("--forward-smoke", action="store_true")
   parser.add_argument("--preflight", action="store_true")
   args = parser.parse_args()
@@ -82,7 +110,11 @@ def main() -> None:
   agent.experiment_name = f"g1_host_a6_{args.arm}"
   agent.max_iterations = args.updates
   agent.num_steps_per_env = 24
-  agent.save_interval = 500
+  agent.save_interval = args.save_interval
+  agent.algorithm.learning_rate = args.learning_rate
+  agent.algorithm.entropy_coef = args.entropy_coef
+  agent.actor.distribution_cfg["init_std"] = args.noise_std
+  agent.actor.distribution_cfg["max_std"] = args.max_noise_std
   dump_yaml(args.log_dir / "env.yaml", asdict(cfg))
   dump_yaml(args.log_dir / "agent.yaml", asdict(agent))
 
@@ -94,10 +126,40 @@ def main() -> None:
     reset_audit = audit_reset(env)
     wrapper = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
     runner = HoSTOnPolicyRunner(wrapper, asdict(agent), str(args.log_dir), "cuda:0")
-    runner.load(str(args.checkpoint), load_optimizer=True, map_location="cuda:0")
-    # A6 is a new adaptation clock; retain native policy/normalizers/optimizer,
-    # but do not inherit the flat pretraining update number for A6 dynamics.
-    # The HoST environment clock and auxiliary curriculum state remain native.
+    # V4 is actor-only transfer.  Preserve the freshly seeded critic and critic
+    # normalizer while loading the source actor and actor normalizer.  The old
+    # critic and Adam moments encode a different reward and caused V3 to erase
+    # the four-posture recovery skill within 500 updates.
+    fresh_critic = copy.deepcopy(runner.alg.policy.critic.state_dict())
+    fresh_critic_normalizer = copy.deepcopy(runner.privileged_obs_normalizer.state_dict())
+    runner.load(
+      str(args.checkpoint),
+      load_optimizer=False,
+      load_cfg={"actor": True, "critic": False},
+      map_location="cuda:0",
+    )
+    runner.alg.policy.critic.load_state_dict(fresh_critic)
+    runner.privileged_obs_normalizer.load_state_dict(fresh_critic_normalizer)
+
+    source = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    source_actor = source["actor_state_dict"]
+    policy_state = runner.alg.policy.state_dict()
+    for name, value in source_actor.items():
+      if name == "distribution.std_param":
+        continue
+      mapped = "actor." + name.removeprefix("mlp.")
+      assert torch.equal(policy_state[mapped].detach().cpu(), value.cpu()), mapped
+    assert len(runner.alg.optimizer.state) == 0
+
+    with torch.no_grad():
+      runner.alg.policy.std.fill_(args.noise_std)
+    runner.alg.policy.std.requires_grad_(args.train_action_std)
+    assert runner.alg.policy.max_noise_std == args.max_noise_std
+    if not args.update_actor_normalizer:
+      runner.obs_normalizer.until = int(runner.obs_normalizer.count.item())
+
+    # A6 is a new adaptation clock.  The HoST environment step and auxiliary
+    # curriculum are retained, while optimization starts at A6 update zero.
     runner.current_learning_iteration = 0
     env._a6_adaptation_start_step = int(env.common_step_counter)
     action = runner.get_inference_policy(device="cuda:0")
@@ -112,7 +174,17 @@ def main() -> None:
       "checkpoint": str(args.checkpoint.resolve()),
       "checkpoint_sha256": checkpoint_hash,
       "method": "existing native 29-joint HoST port (single-critic PPO; not full paper HoST)",
-      "checkpoint_state": "actor, critic, optimizer and observation normalizers retained",
+      "checkpoint_state": "actor and actor observation normalizer retained; critic, critic normalizer and optimizer freshly initialized",
+      "actor_exact_at_launch": True,
+      "fresh_critic": True,
+      "fresh_optimizer": True,
+      "critic_state_sha256": tensor_state_sha256(runner.alg.policy.critic.state_dict()),
+      "noise_std": args.noise_std,
+      "max_noise_std": args.max_noise_std,
+      "action_std_frozen": not args.train_action_std,
+      "actor_normalizer_frozen": not args.update_actor_normalizer,
+      "learning_rate": args.learning_rate,
+      "entropy_coef": args.entropy_coef,
       "adaptation_clock_reset": True,
       "a6_adaptation_start_step": env._a6_adaptation_start_step,
       "native_env_step_counter_retained": int(env.common_step_counter),
