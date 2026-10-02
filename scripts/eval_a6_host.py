@@ -16,6 +16,8 @@ import numpy as np
 import torch
 
 from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs.mdp import push_by_setting_velocity
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.rl import RslRlVecEnvWrapper
 
 from src.tasks.host_recovery.a6_runtime import (
@@ -160,6 +162,9 @@ def main() -> None:
   parser.add_argument("--num-envs", type=int, default=1024)
   parser.add_argument("--steps", type=int, default=1000)
   parser.add_argument("--seed", type=int, default=20261021)
+  parser.add_argument(
+    "--condition", choices=("nominal", "randomized"), default="nominal"
+  )
   args = parser.parse_args()
   if args.num_envs < 32 or args.num_envs % 32:
     raise ValueError("num-envs must be >=32 and divisible by 32")
@@ -171,7 +176,7 @@ def main() -> None:
   cfg = a6_env_cfg(
     play=True,
     seed=args.seed,
-    dynamics=False,
+    dynamics=args.condition == "randomized",
     group=args.group,
     bank_split="validation",
   )
@@ -181,11 +186,33 @@ def main() -> None:
   # captured before an automatic reset clears it. Invalid worlds are censored
   # locally from all later evaluation statistics.
   cfg.terminations.pop("invalid_plate", None)
-  for event in ("foot_friction", "encoder_bias", "base_com", "push_robot"):
-    cfg.events.pop(event, None)
+  if args.condition == "nominal":
+    for event in ("foot_friction", "encoder_bias", "base_com", "push_robot"):
+      cfg.events.pop(event, None)
+  else:
+    cfg.observations["actor"].terms["host"].params["add_noise"] = True
+    cfg.events["push_robot"] = EventTermCfg(
+      func=push_by_setting_velocity,
+      mode="interval",
+      interval_range_s=(1.0, 3.0),
+      params={
+        "velocity_range": {
+          "x": (-0.5, 0.5),
+          "y": (-0.5, 0.5),
+          "z": (-0.4, 0.4),
+          "roll": (-0.52, 0.52),
+          "pitch": (-0.52, 0.52),
+          "yaw": (-0.78, 0.78),
+        }
+      },
+    )
 
   agent = unitree_g1_host_standup_ppo_runner_cfg()
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0", render_mode=None)
+  if args.condition == "randomized":
+    # The wrapper's first reset sees the fully expanded training ranges:
+    # +/-20% grouped dynamics and a 4--12 kg plate.
+    env._a6_adaptation_start_step = -100_000
   wrapper = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
   try:
     runner = HoSTOnPolicyRunner(wrapper, asdict(agent), device="cuda:0")
@@ -331,6 +358,7 @@ def main() -> None:
       "checkpoint": str(args.checkpoint.resolve()),
       "checkpoint_sha256": _sha256(args.checkpoint),
       "group": args.group,
+      "condition": args.condition,
       "split": "historical_validation",
       "not_independent_final_test": True,
       "seed": args.seed,
@@ -341,16 +369,21 @@ def main() -> None:
       "bank_sha256": bank_hashes,
       "initial_qpos_sha256": initial_qpos_sha,
       "reset_counts": a6_reset_counts(env),
-      "nominal": {
-        "plate_mass_kg": 6.0,
-        "a6_dynamics_randomization": False,
-        "reset_randomization_events_removed": [
-          "foot_friction",
-          "encoder_bias",
-          "base_com",
-          "push_robot",
-        ],
-        "actor_observation_noise": False,
+      "evaluation_condition": {
+        "plate_mass_kg": 6.0 if args.condition == "nominal" else [4.0, 12.0],
+        "a6_dynamics_randomization": args.condition == "randomized",
+        "grouped_dynamics_range": (
+          None if args.condition == "nominal" else [-0.2, 0.2]
+        ),
+        "reset_randomization_events": (
+          []
+          if args.condition == "nominal"
+          else ["foot_friction", "encoder_bias", "base_com"]
+        ),
+        "push_interval_seconds": (
+          None if args.condition == "nominal" else [1.0, 3.0]
+        ),
+        "actor_observation_noise": args.condition == "randomized",
       },
       "stability_definition": {
         "height_min_m": 1.15,
