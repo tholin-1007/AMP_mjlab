@@ -34,6 +34,12 @@ from src.tasks.host_recovery.a6_runtime import (
   _a6_gate_ramp,
   _a6_smooth_gate,
   _a6_update,
+  _a6_head_offset,
+  _a6_head_velocity,
+  _a6_height,
+  _a6_vertical_overspeed,
+  _a6_completion_clearance,
+  _plate_geometry,
   a6_env_cfg,
 )
 
@@ -109,6 +115,21 @@ def main() -> int:
           assert name not in active, (group, name)
 
       obs, _ = env.reset()
+      assert not env._a6_ever_contact.any()
+      robot = env.scene["robot"]
+      # Check the reconstructed head point against MuJoCo's rotation matrix.
+      body_id = robot.indexing.body_ids[env._a6_head_body]
+      expected_offset = env.sim.data.xmat[:, body_id, :, 2] * 0.43
+      assert torch.allclose(_a6_head_offset(env), expected_offset, atol=1e-6)
+      expected_velocity = robot.data.body_link_lin_vel_w[:, env._a6_head_body] + torch.cross(
+        robot.data.body_link_ang_vel_w[:, env._a6_head_body], expected_offset, dim=-1
+      )
+      assert torch.allclose(_a6_head_velocity(env), expected_velocity, atol=1e-6)
+      assert torch.allclose(
+        _a6_height(env), robot.data.body_link_pos_w[:, env._a6_head_body, 2]
+        + expected_offset[:, 2] - env.scene.env_origins[:, 2], atol=1e-6,
+      )
+      assert torch.isfinite(_a6_completion_clearance(env)).all()
       assert tuple(obs["actor"].shape) == (args.num_envs, 564)
       actions = torch.zeros((args.num_envs, 29), device=env.device)
       for step in range(args.steps):
@@ -178,6 +199,23 @@ def main() -> int:
     assert not env._a6_escaped[ids].any()
 
     # Formula counterexamples on pure tensors.
+    vz = torch.tensor([0.25, 0.25, -0.25, 0.35], device=args.device)
+    stage = torch.tensor([0, 3, 0, 0], device=args.device)
+    assert torch.allclose(
+      _a6_vertical_overspeed(vz, stage),
+      torch.tensor([0.0, 0.0025, 0.0025, 0.0025], device=args.device), atol=1e-7,
+    )
+    # Raise every robot collision above the board: completion exempts it,
+    # whereas planar guidance still sees the same XY coverage.
+    gids = env._a6_robot_geoms
+    saved_positions = env.sim.data.geom_xpos[:, gids].clone()
+    before_planar = _plate_geometry(env)[0].clone()
+    try:
+      env.sim.data.geom_xpos[:, gids, 2] += 10.0
+      assert torch.equal(_plate_geometry(env)[0], before_planar)
+      assert torch.all(_a6_completion_clearance(env) == 1.0)
+    finally:
+      env.sim.data.geom_xpos[:, gids] = saved_positions
     x = torch.linspace(0.0, 1.0, 5)
     assert torch.allclose(_a6_gate_ramp(x, 0.2, 0.8), ((x - 0.2) / 0.6).clamp(0, 1))
     t = ((x - 0.2) / 0.6).clamp(0.0, 1.0)

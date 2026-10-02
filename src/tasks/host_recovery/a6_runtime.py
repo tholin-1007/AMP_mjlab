@@ -43,6 +43,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor.contact_sensor import ContactMatch, ContactSensorCfg
+from mjlab.utils.lab_api.math import quat_apply
 
 from src.assets.robots.unitree_g1.unitree_actuators import (
   UnitreeActuator,
@@ -974,8 +975,48 @@ def _a6_gate_ramp(value, low, high):
 def _a6_height(env):
   """Reconstructed SMP head-site height above the local env origin."""
   robot = env.scene["robot"]
-  torso_z = robot.data.body_link_pos_w[:, env._a6_head_body, 2]
-  return torso_z + A6_HEAD_Z_OFFSET - env.scene.env_origins[:, 2]
+  return (
+    robot.data.body_link_pos_w[:, env._a6_head_body, 2]
+    + _a6_head_offset(env)[:, 2]
+    - env.scene.env_origins[:, 2]
+  )
+
+
+def _a6_head_offset(env):
+  robot = env.scene["robot"]
+  local = torch.zeros((env.num_envs, 3), device=env.device)
+  local[:, 2] = A6_HEAD_Z_OFFSET
+  return quat_apply(robot.data.body_link_quat_w[:, env._a6_head_body], local)
+
+
+def _a6_head_velocity(env):
+  robot = env.scene["robot"]
+  return robot.data.body_link_lin_vel_w[:, env._a6_head_body] + torch.cross(
+    robot.data.body_link_ang_vel_w[:, env._a6_head_body],
+    _a6_head_offset(env),
+    dim=-1,
+  )
+
+
+def _a6_vertical_overspeed(vz, stage):
+  up = vz.new_tensor((0.30, 0.30, 0.30, 0.20))[stage]
+  return (vz - up).clamp_min(0.0).square() + (-vz - 0.20).clamp_min(0.0).square()
+
+
+def _a6_completion_clearance(env):
+  """Historical completion geometry; deliberately distinct from planar G."""
+  pos, ext = _robot_bounds(env)
+  rows = torch.arange(env.num_envs, device=env.device)
+  gid = env._a6_plate_geoms[(env._a6_scene == 2).long()]
+  pp = env.sim.data.geom_xpos[rows, gid]
+  pe = torch.einsum(
+    "nij,nj->ni", env.sim.data.geom_xmat[rows, gid].abs(),
+    env.sim.model.geom_size[rows, gid],
+  )
+  delta = (pos[..., :2] - pp[:, None, :2]).abs() - ext[..., :2] - pe[:, None, :2]
+  sep = delta.amax(-1)
+  above = (pos[..., 2] - ext[..., 2]) > pp[:, None, 2] + pe[:, None, 2] + 0.025
+  return torch.where(above, torch.ones_like(sep), sep).amin(-1)
 
 
 def _a6_upright(env):
@@ -1018,7 +1059,8 @@ def _a6_sample_substep(env):
     env._a6_joint_acc.zero_()
 
   robot = env.scene["robot"]
-  tau = robot.data.actuator_force
+  # Generalised torque is in joint/DoF order, matching dq and torque limits.
+  tau = env.sim.data.qfrc_actuator[:, robot.indexing.joint_v_adr]
   dq = robot.data.joint_vel
   stage = env._a6_stage
 
@@ -1034,13 +1076,13 @@ def _a6_sample_substep(env):
   power_limits = tau.new_tensor((140.0, 110.0, 90.0, 75.0))[stage, None]
   joint_acc_weight = tau.new_tensor((0.35, 0.65, 1.0, 1.0))[stage]
   torque_weight = tau.new_tensor((0.5, 0.75, 1.0, 1.0))[stage]
-  head_vz = robot.data.body_link_lin_vel_w[:, env._a6_head_body, 2]
+  head_vz = _a6_head_velocity(env)[:, 2]
 
   joint_acc = robot.data.joint_acc.square().sum(-1) * joint_acc_weight
   torque_cost = tau.square().sum(-1) * torque_weight
   speed_cost = (dq.abs() - speed_limits).clamp_min(0.0).square().sum(-1)
   power_cost = ((tau * dq).abs() - power_limits).clamp_min(0.0).square().mean(-1)
-  head_overspeed = (head_vz.abs() - 0.2).clamp_min(0.0).square()
+  head_overspeed = _a6_vertical_overspeed(head_vz, stage)
   sustained = _a6_effort_cost(env._a6_f_effort_ms)
   env._a6_accum += torch.stack(
     [
@@ -1116,7 +1158,7 @@ def _a6_phase_update(env, env_ids=None):
   env._a6_force = force
   env._a6_ever_contact |= contact & active
 
-  _, _, clearance = _plate_geometry(env)
+  clearance = _a6_completion_clearance(env)
   env._a6_clearance = clearance
 
   rows = torch.arange(env.num_envs, device=env.device)
@@ -1140,7 +1182,7 @@ def _a6_phase_update(env, env_ids=None):
   env._a6_invalid = active & (
     (depth < -0.02)
     | (force > 1500.0)
-    | (which & (env.episode_length_buf > 25) & ~env._a6_ever_contact)
+    | ((env.episode_length_buf > 25) & ~env._a6_ever_contact)
   )
 
 
@@ -1209,7 +1251,7 @@ def _a6_components(env):
   robot = env.scene["robot"]
   height = _a6_height(env)
   upright = _a6_upright(env)
-  head_vz = robot.data.body_link_lin_vel_w[:, env._a6_head_body, 2]
+  head_vz = _a6_head_velocity(env)[:, 2]
   knees = robot.data.joint_pos[:, env._a6_knee_joints]
   stage = env._a6_stage
 
@@ -1734,10 +1776,8 @@ def a6_reset(
   _park_and_place_plates(env, env_ids)
   _clear_a6_runtime_buffers(env, env_ids)
 
-  # A vertically guided overhead board constrains the path before literal
-  # contact; only the free board uses contact-based eligibility and the
-  # 25-step missing-contact invalid guard.
-  env._a6_ever_contact[env_ids] = env._a6_scene[env_ids] == 1
+  # Historical eligibility requires actual contact for both board types.
+  env._a6_ever_contact[env_ids] = False
 
   coverage, score, clearance = _plate_geometry(env)
   env._a6_best_score[env_ids] = score[env_ids]
