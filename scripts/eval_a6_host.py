@@ -81,8 +81,8 @@ def _set_action_scale(env, value: float) -> None:
   )
 
 
-def _stable(env) -> torch.Tensor:
-  """Frozen historical stability checker used by the A6 evaluation."""
+def _stability_components(env) -> dict[str, torch.Tensor]:
+  """Return every predicate in the frozen historical stability checker."""
   robot = env.scene["robot"]
   height = _a6_height(env)
   upright = _a6_upright(env)
@@ -97,19 +97,23 @@ def _stable(env) -> torch.Tensor:
   angular_speed = robot.data.root_link_ang_vel_w.norm(dim=-1)
   joint_rms = robot.data.joint_vel.square().mean(-1).sqrt()
   knee = robot.data.joint_pos[:, env._a6_knee_joints].abs().amax(-1)
-  return (
-    (height >= 1.15)
-    & (upright >= 0.93)
-    & (knee < 0.8)
-    & (base_speed < 0.15)
-    & (angular_speed < 0.3)
-    & (joint_rms < 0.5)
-    & (foot_speed < 0.1)
-    & (foot_load > 20.0)
-    & (other_load < 20.0)
-    & (width >= 0.12)
-    & (width <= 0.45)
-  )
+  return {
+    "height": height >= 1.15,
+    "upright": upright >= 0.93,
+    "knee": knee < 0.8,
+    "base_speed": base_speed < 0.15,
+    "angular_speed": angular_speed < 0.3,
+    "joint_speed": joint_rms < 0.5,
+    "foot_speed": foot_speed < 0.1,
+    "foot_load": foot_load > 20.0,
+    "other_contact": other_load < 20.0,
+    "foot_width_low": width >= 0.12,
+    "foot_width_high": width <= 0.45,
+  }
+
+
+def _stable(components: dict[str, torch.Tensor]) -> torch.Tensor:
+  return torch.stack(tuple(components.values()), dim=-1).all(-1)
 
 
 def _summarize(mask: torch.Tensor, arrays: dict[str, torch.Tensor]) -> dict:
@@ -122,6 +126,8 @@ def _summarize(mask: torch.Tensor, arrays: dict[str, torch.Tensor]) -> dict:
     "clear_rate": _fraction(escaped[plate]) if plate.any() else None,
     "sr1": _fraction(sr1),
     "sr10": _fraction(sr10),
+    "core_sr1": _fraction(arrays["core_sr1"][mask]),
+    "core_sr10": _fraction(arrays["core_sr10"][mask]),
     "early_termination": _fraction(arrays["early_done"][mask]),
     "invalid_plate": _fraction(arrays["invalid"][mask]),
     "refall_after_upright": _fraction(arrays["refall"][mask]),
@@ -137,6 +143,11 @@ def _summarize(mask: torch.Tensor, arrays: dict[str, torch.Tensor]) -> dict:
     "joint_power_peak_p95": _p95(arrays["power_peak"][mask]),
     "high_load_time_p95": _p95(arrays["high_load_time"][mask]),
     "longest_high_load_p95": _p95(arrays["longest_high_load"][mask]),
+    "stability_component_true_fraction": {
+      name.removeprefix("stability_fraction_"): _mean(value[mask])
+      for name, value in arrays.items()
+      if name.startswith("stability_fraction_")
+    },
   }
   return result
 
@@ -204,6 +215,8 @@ def main() -> None:
     fall_time = torch.zeros(n, device=device)
     hold = torch.zeros_like(fall_time)
     best_hold = torch.zeros_like(fall_time)
+    core_hold = torch.zeros_like(fall_time)
+    best_core_hold = torch.zeros_like(fall_time)
     first_escape = torch.full_like(fall_time, -1.0)
     first_sr1 = torch.full_like(fall_time, -1.0)
     first_sr10 = torch.full_like(fall_time, -1.0)
@@ -217,6 +230,8 @@ def main() -> None:
     env._a6_eval_longest_high_load = torch.zeros(n, joints, device=device)
 
     plate = env._a6_scene > 0
+    component_time: dict[str, torch.Tensor] = {}
+    evaluated_time = torch.zeros(n, device=device)
     with torch.no_grad():
       for step in range(args.steps):
         actions = policy(obs["actor"])
@@ -233,9 +248,24 @@ def main() -> None:
         first_escape[newly_escaped] = (step + 1) * env.step_dt
         ever_escaped |= escaped_now
 
-        stable = _stable(env) & alive & (~plate | escaped_now)
+        components = _stability_components(env)
+        if not component_time:
+          component_time = {
+            name: torch.zeros(n, device=device) for name in components
+          }
+        evaluated_time += alive * env.step_dt
+        for name, value in components.items():
+          component_time[name] += value * alive * env.step_dt
+
+        eligibility = alive & (~plate | escaped_now)
+        stable = _stable(components) & eligibility
         hold = torch.where(stable, hold + env.step_dt, torch.zeros_like(hold))
         best_hold = torch.maximum(best_hold, hold)
+        core_stable = components["height"] & components["upright"] & eligibility
+        core_hold = torch.where(
+          core_stable, core_hold + env.step_dt, torch.zeros_like(core_hold)
+        )
+        best_core_hold = torch.maximum(best_core_hold, core_hold)
         new_sr1 = (hold >= 1.0 - 1e-4) & (first_sr1 < 0)
         new_sr10 = (hold >= 10.0 - 1e-4) & (first_sr10 < 0)
         first_sr1[new_sr1] = (step + 1) * env.step_dt - 1.0
@@ -251,12 +281,16 @@ def main() -> None:
 
     sr1 = best_hold >= 1.0 - 1e-4
     sr10 = best_hold >= 10.0 - 1e-4
+    core_sr1 = best_core_hold >= 1.0 - 1e-4
+    core_sr10 = best_core_hold >= 10.0 - 1e-4
     trial_peak = lambda value: value.amax(-1)  # noqa: E731
     arrays = {
       "plate": plate,
       "escaped": ever_escaped,
       "sr1": sr1,
       "sr10": sr10,
+      "core_sr1": core_sr1,
+      "core_sr10": core_sr10,
       "early_done": early_done,
       "invalid": ever_invalid,
       "refall": refall,
@@ -268,6 +302,10 @@ def main() -> None:
       "power_peak": trial_peak(env._a6_eval_power_peak),
       "high_load_time": trial_peak(env._a6_eval_high_load_time),
       "longest_high_load": trial_peak(env._a6_eval_longest_high_load),
+      **{
+        f"stability_fraction_{name}": value / evaluated_time.clamp_min(env.step_dt)
+        for name, value in component_time.items()
+      },
     }
 
     masks = {name: env._a6_scene == idx for idx, name in enumerate(SCENE_NAMES)}
@@ -282,7 +320,7 @@ def main() -> None:
     scene_rows = [summary[name] for name in SCENE_NAMES]
     macro = {
       metric: float(np.mean([row[metric] for row in scene_rows]))
-      for metric in ("sr1", "sr10")
+      for metric in ("sr1", "sr10", "core_sr1", "core_sr10")
     }
     macro["plate_clear_rate"] = float(
       np.mean([summary[name]["clear_rate"] for name in SCENE_NAMES[1:]])
