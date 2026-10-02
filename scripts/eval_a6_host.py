@@ -247,6 +247,10 @@ def main() -> None:
     first_escape = torch.full_like(fall_time, -1.0)
     first_sr1 = torch.full_like(fall_time, -1.0)
     first_sr10 = torch.full_like(fall_time, -1.0)
+    invalid_depth = torch.zeros_like(alive)
+    invalid_force = torch.zeros_like(alive)
+    invalid_no_contact = torch.zeros_like(alive)
+    first_invalid = torch.full_like(fall_time, -1.0)
 
     joints = robot.data.joint_pos.shape[-1]
     env._a6_eval_active = alive.clone()
@@ -266,6 +270,16 @@ def main() -> None:
         is_early = dones.bool() & (step + 1 < args.steps)
         early_done |= is_early
         invalid_now = env._a6_invalid & alive
+        if invalid_now.any():
+          depth = torch.where(
+            env._a6_scene == 2,
+            env.scene["free_contact"].data.dist.amin(-1),
+            env.scene["guided_contact"].data.dist.amin(-1),
+          )
+          invalid_depth |= invalid_now & (depth < -0.02)
+          invalid_force |= invalid_now & (env._a6_force > 1500.0)
+          invalid_no_contact |= invalid_now & ~env._a6_ever_contact & (env.episode_length_buf > 25)
+          first_invalid[invalid_now] = (step + 1) * env.step_dt
         ever_invalid |= invalid_now
         alive &= ~(is_early | invalid_now)
         env._a6_eval_active.copy_(alive)
@@ -320,6 +334,10 @@ def main() -> None:
       "core_sr10": core_sr10,
       "early_done": early_done,
       "invalid": ever_invalid,
+      "invalid_depth": invalid_depth,
+      "invalid_force": invalid_force,
+      "invalid_no_contact": invalid_no_contact,
+      "first_invalid": first_invalid,
       "refall": refall,
       "best_hold": best_hold,
       "first_escape": first_escape,
@@ -359,6 +377,7 @@ def main() -> None:
       "checkpoint_sha256": _sha256(args.checkpoint),
       "group": args.group,
       "condition": args.condition,
+      "runtime_revision": "v5_frozen_semantics",
       "split": "historical_validation",
       "not_independent_final_test": True,
       "seed": args.seed,
