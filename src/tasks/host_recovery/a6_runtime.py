@@ -356,6 +356,7 @@ def a6_env_cfg(
   seed: int | None = None,
   dynamics: bool | None = None,
   group: str = "G+",
+  bank_split: str = "train",
 ) -> "ManagerBasedRlEnvCfg":
   """Return the A6 three-scene environment configuration.
 
@@ -365,12 +366,15 @@ def a6_env_cfg(
   evaluation, randomised during training.  ``group`` selects the dense escape
   guidance arm: ``"G+"`` keeps G/clearance/separation and obstacle alpha=0.05;
   ``"G-"`` disables those three dense terms and keeps alpha=1.0.  Completion,
-  plate force, Q and L stay on in both groups.
+  plate force, Q and L stay on in both groups. ``bank_split`` is explicitly
+  restricted to the archived train or historical-validation assets.
   """
   from mjlab.envs import ManagerBasedRlEnvCfg
 
   if group not in ("G+", "G-"):
     raise ValueError(f"unknown A6 group {group!r}")
+  if bank_split not in ("train", "validation"):
+    raise ValueError(f"unknown A6 bank split {bank_split!r}")
   dense_guide = group == "G+"
   if dynamics is None:
     dynamics = not play
@@ -477,7 +481,9 @@ def a6_env_cfg(
 
   # This reset must run after the flat reset events, so it is appended after
   # the existing configuration has been fully constructed.
-  cfg.events["a6_reset"] = EventTermCfg(func=a6_reset, mode="reset", params={})
+  cfg.events["a6_reset"] = EventTermCfg(
+    func=a6_reset, mode="reset", params={"bank_split": bank_split}
+  )
   cfg.events["a6_dynamics_reset"] = EventTermCfg(
     func=a6_dynamics_reset,
     mode="reset",
@@ -604,10 +610,17 @@ def _natural_weights(bank: dict[str, np.ndarray]) -> np.ndarray:
   return weights
 
 
-def _ensure_a6_state(env: "ManagerBasedRlEnv") -> None:
+def _ensure_a6_state(
+  env: "ManagerBasedRlEnv", bank_split: str | None = None
+) -> None:
   """Allocate per-environment A6 buffers and bank pools once per env."""
   if getattr(env, "_a6_initialized", False):
+    if bank_split is not None and env._a6_bank_split != bank_split:
+      raise RuntimeError("A6 bank split cannot change after initialization")
     return
+  bank_split = bank_split or "train"
+  if bank_split not in ("train", "validation"):
+    raise ValueError(f"unknown A6 bank split {bank_split!r}")
 
   num_envs = env.num_envs
   device = env.device
@@ -636,9 +649,16 @@ def _ensure_a6_state(env: "ManagerBasedRlEnv") -> None:
   # Verified low obstacle/natural/procedural bank. The multiterrain bank has
   # already merged natural and procedural low rows into one screened dataset;
   # ``source`` is the 0/1 provenance column.
-  low_np = np.load(A6_ROOT / LOW_BANK_PATH, allow_pickle=False)
-  nat_np = np.load(A6_ROOT / NATURAL_BANK_PATH, allow_pickle=False)
-  np.load(A6_ROOT / PROCEDURAL_BANK_PATH, allow_pickle=False)
+  low_np = np.load(
+    A6_ROOT / LOW_BANK_PATH.with_name(f"{bank_split}.npz"), allow_pickle=False
+  )
+  nat_np = np.load(
+    A6_ROOT / NATURAL_BANK_PATH.with_name(f"{bank_split}.npz"), allow_pickle=False
+  )
+  np.load(
+    A6_ROOT / PROCEDURAL_BANK_PATH.with_name(f"{bank_split}.npz"),
+    allow_pickle=False,
+  )
 
   env._a6_low_bank = torch.as_tensor(
     low_np["qpos"], dtype=torch.float32, device=device
@@ -838,6 +858,7 @@ def _ensure_a6_state(env: "ManagerBasedRlEnv") -> None:
   env._a6_gain_factors = torch.ones((num_envs, 6), device=device)
   env._a6_nominal = torch.ones(num_envs, dtype=torch.bool, device=device)
   env._a6_plate_mass = torch.full((num_envs,), 6.0, device=device)
+  env._a6_bank_split = bank_split
 
   env._a6_initialized = True
 
@@ -1047,6 +1068,21 @@ def _a6_sample_substep(env):
   )
   env._a6_load_acc += stall.amax(-1)
   env._a6_joint_acc += stall
+  if hasattr(env, "_a6_eval_tau_peak"):
+    active = env._a6_eval_active[:, None]
+    env._a6_eval_tau_peak.copy_(
+      torch.maximum(env._a6_eval_tau_peak, tau.abs() * active)
+    )
+    env._a6_eval_speed_peak.copy_(
+      torch.maximum(env._a6_eval_speed_peak, dq.abs() * active)
+    )
+    env._a6_eval_power_peak.copy_(
+      torch.maximum(env._a6_eval_power_peak, (tau * dq).abs() * active)
+    )
+    env._a6_eval_high_load_time += high_load * active * env.physics_dt
+    env._a6_eval_longest_high_load.copy_(
+      torch.maximum(env._a6_eval_longest_high_load, env._a6_timer * active)
+    )
   env._a6_subtick += 1
   return head_vz.abs()
 
@@ -1666,7 +1702,9 @@ def a6_audit_dynamics(env: "ManagerBasedRlEnv") -> dict[str, bool]:
 
 
 def a6_reset(
-  env: "ManagerBasedRlEnv", env_ids: torch.Tensor | None = None
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None = None,
+  bank_split: str = "train",
 ) -> None:
   """Exact A6 reset event.
 
@@ -1674,7 +1712,7 @@ def a6_reset(
   only the requested worlds with the selected bank pose, board placement, zero
   velocities, and cleared runtime buffers.
   """
-  _ensure_a6_state(env)
+  _ensure_a6_state(env, bank_split=bank_split)
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
   else:
