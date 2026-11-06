@@ -1,0 +1,13 @@
+iteration,scene,posture,n,valid_stand,invalid
+2999,flat,prone,128,48,0
+2999,flat,supine,128,127,0
+2999,flat,left_side_down,128,113,0
+2999,flat,right_side_down,128,73,0
+3799,flat,prone,128,51,0
+3799,flat,supine,128,127,0
+3799,flat,left_side_down,128,107,0
+3799,flat,right_side_down,128,70,0
+3999,flat,prone,128,32,0
+3999,flat,supine,128,127,0
+3999,flat,left_side_down,128,106,0
+3999,flat,right_side_down,128,62,0

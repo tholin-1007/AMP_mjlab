@@ -1,0 +1,46 @@
+{
+  ".gitattributes": {
+    "bytes": 8,
+    "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+  },
+  "data/host-flat-results.csv": {
+    "bytes": 412,
+    "sha256": "d43afd2845bed8ba5cd1d900d3ebdb812440948f78ed249c040dded24443af8f"
+  },
+  "data/host-results.csv": {
+    "bytes": 101,
+    "sha256": "e89fb195cc580e89f6a517ff3951b0564d6a71b4ae43eb417d2b00974b773da2"
+  },
+  "index.html": {
+    "bytes": 1268,
+    "sha256": "eaeb2169709a81f95e5813759e962daf62997b9d8db4aff4cc310abe568a8434"
+  },
+  "media/HoST_model_02999_seed42_four_scenes.mp4": {
+    "bytes": 6871675,
+    "sha256": "bb515bf7b85fd4e7f522b4ef71a1fb893f1a3576a2448175d57dd28947001770"
+  },
+  "media/HoST_model_02999_seed42_free_supine.mp4": {
+    "bytes": 1118984,
+    "sha256": "a1ef8743cf7ba33ac23e2c9eb304d3bd9749bb61ef269f587355b258f10c5a0a"
+  },
+  "media/HoST_model_02999_seed42_guided_prone.mp4": {
+    "bytes": 2351611,
+    "sha256": "4fc0efb032b19a7c4337d28c4629f90dbdc3463fc8c7da12e09718472d0c35a0"
+  },
+  "media/HoST_model_02999_seed42_poster.png": {
+    "bytes": 572527,
+    "sha256": "7b59e54cd13c44481c9ac94e7fee17d1167fc63c2127cd75c86e5a02f040aa39"
+  },
+  "README.md": {
+    "bytes": 3905,
+    "sha256": "059cc303936438581f703cba9965050a2cf732c33ccb96fac56892f43c93f324"
+  },
+  "source_host_excerpt.txt": {
+    "bytes": 9276,
+    "sha256": "1a3f3baf2fa56358a3f77a3c5dacf2ff78df204407aa1ae9853a662f93cf19d8"
+  },
+  "verify_evidence.py": {
+    "bytes": 356,
+    "sha256": "b359aa9623fb8e6b09681da5d1c6e625c5617ac1ab0ac9c9f9e318ee14e8983e"
+  }
+}
